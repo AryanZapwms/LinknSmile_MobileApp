@@ -5,6 +5,7 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*'],
+    // contracts/ is a verbatim copy of the web repo's lib/contracts (scripts/sync-contracts.mjs).
+    ignores: ['dist/*', 'contracts/*'],
   },
 ]);
