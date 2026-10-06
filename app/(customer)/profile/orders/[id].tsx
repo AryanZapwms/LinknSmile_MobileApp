@@ -8,6 +8,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../../../services/api';
+import { telUrl, useSupportContacts } from '../../../../store/app-config.store';
+import { formatMoney } from '../../../../utils/money';
 import { Theme } from '../../../../constants/theme';
 
 interface OrderDetail {
@@ -28,17 +30,21 @@ interface OrderDetail {
   shippingAddress: {
     name?: string;
     phone?: string;
-    addressLine1?: string;
-    addressLine2?: string;
+    /** The server stores the street under `street` (older orders: `address`). */
+    street?: string;
+    address?: string;
     city?: string;
     state?: string;
     pincode?: string;
   };
+  /** Sum of the lines before any coupon. */
   subtotal: number;
-  shippingCost: number;
+  /** Coupon discount (order.appliedCoupon), 0 if none. */
   discount: number;
+  couponCode?: string;
+  tax: number;
+  /** order.totalAmount: what the customer pays. */
   total: number;
-  promoCode?: string;
 }
 
 const STATUS_META: Record<string, { color: string; bg: string; icon: string; label: string }> = {
@@ -53,6 +59,7 @@ const TIMELINE = ['pending', 'processing', 'shipped', 'delivered'];
 
 export default function OrderDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const support = useSupportContacts();
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -70,7 +77,7 @@ export default function OrderDetailScreen() {
         const res = await api.get(`/api/orders/${id}`);
         const rawOrder = res.data?.order ?? res.data;
         
-        const items = (rawOrder.items || []).map((item: any) => ({
+        const items: OrderDetail['items'] = (rawOrder.items || []).map((item: any) => ({
           productId: item.product?._id || item.productId,
           name: item.product?.name || 'Product',
           image: item.product?.image,
@@ -90,11 +97,11 @@ export default function OrderDetailScreen() {
           cancellationReason: rawOrder.cancellationReason, // added
           items: items,
           shippingAddress: rawOrder.shippingAddress || {},
-          subtotal: rawOrder.subtotal ?? computedSubtotal,
-          shippingCost: rawOrder.shippingCost ?? 0,
-          discount: rawOrder.discount ?? 0,
-          total: rawOrder.totalAmount ?? rawOrder.total ?? 0,
-          promoCode: rawOrder.promoCode,
+          subtotal: computedSubtotal,
+          discount: rawOrder.appliedCoupon?.discountAmount ?? 0,
+          couponCode: rawOrder.appliedCoupon?.code,
+          tax: rawOrder.taxAmount ?? 0,
+          total: rawOrder.totalAmount ?? 0,
         };
         
         setOrder(mappedOrder);
@@ -262,7 +269,7 @@ export default function OrderDetailScreen() {
                 </View>
                 <View style={styles.itemRight}>
                   <Text style={styles.itemPrice}>
-                    ₹{(item.price * item.quantity).toFixed(0)}
+                    {formatMoney(item.price * item.quantity)}
                   </Text>
                   {isDelivered && (
                     <TouchableOpacity
@@ -295,8 +302,7 @@ export default function OrderDetailScreen() {
           )}
           <Text style={styles.addrLine}>
             {[
-              order.shippingAddress.addressLine1,
-              order.shippingAddress.addressLine2,
+              order.shippingAddress.street ?? order.shippingAddress.address,
               order.shippingAddress.city,
               order.shippingAddress.state,
               order.shippingAddress.pincode,
@@ -318,13 +324,18 @@ export default function OrderDetailScreen() {
             </Text>
           </View>
           <View style={styles.divider} />
-          <SummaryRow label="Subtotal" value={`₹${order.subtotal?.toFixed(0) ?? '—'}`} />
-          <SummaryRow label="Shipping" value={order.shippingCost === 0 ? 'FREE' : `₹${order.shippingCost}`} valueColor={order.shippingCost === 0 ? Theme.colors.success : undefined} />
-          {(order.discount ?? 0) > 0 && (
-            <SummaryRow label={`Promo (${order.promoCode ?? ''})`} value={`−₹${order.discount}`} valueColor={Theme.colors.success} />
+          <SummaryRow label="Subtotal" value={formatMoney(order.subtotal)} />
+          {order.discount > 0 && (
+            <SummaryRow
+              label={order.couponCode ? `Coupon (${order.couponCode})` : 'Discount'}
+              value={`− ${formatMoney(order.discount)}`}
+              valueColor={Theme.colors.success}
+            />
           )}
+          {order.tax > 0 && <SummaryRow label="Tax" value={formatMoney(order.tax)} />}
+          <SummaryRow label="Shipping" value="FREE" valueColor={Theme.colors.success} />
           <View style={styles.divider} />
-          <SummaryRow label="Total Paid" value={`₹${order.total?.toFixed(0)}`} bold />
+          <SummaryRow label="Total" value={formatMoney(order.total)} bold />
         </View>
 
         {/* Help */}
@@ -332,7 +343,7 @@ export default function OrderDetailScreen() {
           <Text style={styles.helpTitle}>Need help with this order?</Text>
           <TouchableOpacity
             style={styles.helpBtn}
-            onPress={() => Linking.openURL('tel:+919820623835')}
+            onPress={() => Linking.openURL(telUrl(support.phone))}
           >
             <Ionicons name="call-outline" size={16} color={Theme.colors.white} />
             <Text style={styles.helpBtnText}>Call Support</Text>

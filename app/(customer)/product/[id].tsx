@@ -13,30 +13,41 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useCartStore, CartItem } from '../../../store/cart.store';
+import { cartItemKey, MAX_CART_UNITS, useCartStore, type CartItem } from '../../../store/cart.store';
 import { api } from '../../../services/api';
-import { storage } from '../../../utils/storage';
+import { errorMessage } from '../../../services/api-error';
 import { Theme } from '../../../constants/theme';
-import { useWishlistStore } from '../../../store/wishlist.store';
+import { telUrl, useAppLinks, useSupportContacts } from '../../../store/app-config.store';
+import { useFavouritesStore } from '../../../store/favourites.store';
 
 const { width } = Dimensions.get('window');
+
+/** A size variant as the server stores it: e.g. size "Small", quantity 50, unit "ml". */
+interface ProductSize {
+  size: string;
+  unit?: string;
+  quantity: number;
+  price: number;
+  discountPrice?: number | null;
+  stock: number;
+}
 
 interface ProductDetails {
   _id: string;
   name: string;
+  slug?: string;
   description: string;
   price: number;
   discountPrice?: number;
+  image?: string;
   images: string[];
   category: { _id: string; name: string } | null;
   shopId?: { _id: string; shopName: string; logo?: string; rating?: number };
-  vendor?: { _id: string; name: string };
   stock: number;
   rating?: number;
   reviews?: Review[];
   specifications?: Record<string, string>;
-  sizes?: { size: string; stock: number }[];
-  colors?: { name: string; hex: string; stock: number }[];
+  sizes?: ProductSize[];
   createdAt: string;
 }
 
@@ -52,17 +63,21 @@ interface Review {
 
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { isInWishlist, addItem, removeItem, fetchWishlist } = useWishlistStore();
+  const isFavourite = useFavouritesStore((s) => s.productIds.includes(id ?? ''));
+  const favouritesLoaded = useFavouritesStore((s) => s.loaded);
+  const loadFavourites = useFavouritesStore((s) => s.load);
+  const toggleFavourite = useFavouritesStore((s) => s.toggleProduct);
+  const support = useSupportContacts();
+  const links = useAppLinks();
   const [product, setProduct] = useState<ProductDetails | null>(null);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [addingToCart, setAddingToCart] = useState(false);
-  const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [favouriteLoading, setFavouriteLoading] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
-  const [selectedSize, setSelectedSize] = useState<string | null>(null);
-  const [selectedColor, setSelectedColor] = useState<string | null>(null);
+  const [selectedSizeIndex, setSelectedSizeIndex] = useState<number | null>(null);
 
   // Review state
   const [userRating, setUserRating] = useState(0);
@@ -70,18 +85,18 @@ export default function ProductDetailScreen() {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
 
-  useEffect(() => {
-    fetchProduct();
-    fetchWishlist();
-    fetchReviews();
-  }, [id]);
-
   const fetchProduct = async () => {
     try {
       const res = await api.get(`/api/products/${id}`);
       setProduct(res.data);
-      if (res.data.sizes?.length) setSelectedSize(res.data.sizes[0].size);
-      if (res.data.colors?.length) setSelectedColor(res.data.colors[0].name);
+      const sizes: ProductSize[] = res.data.sizes ?? [];
+      if (sizes.length) {
+        // Start on the first size that can actually be bought.
+        const firstInStock = sizes.findIndex((s) => s.stock > 0);
+        setSelectedSizeIndex(firstInStock >= 0 ? firstInStock : 0);
+      } else {
+        setSelectedSizeIndex(null);
+      }
     } catch {
       Alert.alert('Error', 'Failed to load product details');
     } finally {
@@ -95,22 +110,20 @@ export default function ProductDetailScreen() {
       if (res.data.success) {
         setReviews(res.data.reviews || []);
       }
-    } catch (err) {
-      // Non-critical — product still shows without reviews
-      console.log('Reviews fetch failed:', err);
+    } catch {
+      // Non-critical: the product still shows without reviews.
     }
   };
 
-  const handleSubmitReview = async () => {
-    const token = await storage.getToken();
-    if (!token) {
-      Alert.alert('Login Required', 'Please sign in to leave a review', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign In', onPress: () => router.push('/auth/login') },
-      ]);
-      return;
-    }
+  useEffect(() => {
+    fetchProduct();
+    fetchReviews();
+    if (!favouritesLoaded) loadFavourites().catch(() => {});
+    // Reload only when a different product is opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
+  const handleSubmitReview = async () => {
     if (userRating === 0) {
       Alert.alert('Rating Required', 'Please select a star rating');
       return;
@@ -135,23 +148,47 @@ export default function ProductDetailScreen() {
           res.data.message || 'Your review has been submitted and will appear after moderation.'
         );
       }
-    } catch (err: any) {
-      const msg = err.response?.data?.error ?? 'Failed to submit review. Please try again.';
-      Alert.alert('Error', msg);
+    } catch (err) {
+      Alert.alert('Error', errorMessage(err, 'Failed to submit review. Please try again.'));
     } finally {
       setSubmittingReview(false);
     }
   };
 
-  const isWishlisted = isInWishlist(id || '');
-
-  const toggleWishlist = async () => {
-    if (wishlistLoading) return;
-    setWishlistLoading(true);
-    const success = isWishlisted ? await removeItem(id!) : await addItem(id!);
-    if (!success) Alert.alert('Error', 'Failed to update wishlist');
-    setWishlistLoading(false);
+  const handleToggleFavourite = async () => {
+    if (!id || favouriteLoading) return;
+    setFavouriteLoading(true);
+    try {
+      await toggleFavourite(id);
+    } catch (err) {
+      Alert.alert('Error', errorMessage(err, 'Could not update favourites.'));
+    } finally {
+      setFavouriteLoading(false);
+    }
   };
+
+  const selectedSize =
+    selectedSizeIndex !== null ? product?.sizes?.[selectedSizeIndex] ?? null : null;
+
+  /** The cart line for the current product, size and quantity. */
+  const buildCartItem = (p: ProductDetails): CartItem => ({
+    productId: p._id,
+    name: p.name,
+    slug: p.slug,
+    price: selectedSize ? selectedSize.price : p.price,
+    discountPrice: (selectedSize ? selectedSize.discountPrice : p.discountPrice) ?? null,
+    quantity,
+    image: p.images?.[0] ?? p.image ?? '',
+    stock: selectedSize ? selectedSize.stock : p.stock,
+    shopId: p.shopId?._id,
+    shopName: p.shopId?.shopName,
+    selectedSize: selectedSize
+      ? { size: selectedSize.size, quantity: selectedSize.quantity, unit: selectedSize.unit }
+      : null,
+  });
+
+  const outOfStockMessage = () =>
+    selectedSize ? 'Selected size is out of stock.' : 'This product is currently out of stock.';
 
   const handleAddToCart = async () => {
     if (!product) return;
@@ -164,61 +201,32 @@ export default function ProductDetailScreen() {
       });
     }
 
-    if (product.stock === 0) {
-      Alert.alert('Out of Stock', 'This product is currently out of stock.');
-      return;
-    }
-
-    let currentStock = product.stock;
-    if (selectedSize && product.sizes) {
-      currentStock = product.sizes.find(s => s.size === selectedSize)?.stock || 0;
-    }
-    if (selectedColor && product.colors) {
-      currentStock = product.colors.find(c => c.name === selectedColor)?.stock || 0;
-    }
-    if (currentStock === 0) {
-      Alert.alert('Out of Stock', 'Selected variant is out of stock.');
+    const item = buildCartItem(product);
+    if (item.stock <= 0) {
+      Alert.alert('Out of Stock', outOfStockMessage());
       return;
     }
 
     const cartStore = useCartStore.getState();
-    if (cartStore.getTotalItems() >= 5) {
+    if (cartStore.getTotalItems() >= MAX_CART_UNITS) {
       setShowBulkModal(true);
       return;
     }
 
-    const existingItem = cartStore.items.find(
-      item => item.productId === product._id &&
-              item.selectedSize === selectedSize &&
-              item.selectedColor === selectedColor
-    );
+    const key = cartItemKey(item);
+    const existingItem = cartStore.items.find((i) => cartItemKey(i) === key);
     if (existingItem) {
       const newQty = existingItem.quantity + quantity;
-      if (newQty > currentStock) {
-        Alert.alert('Max Stock', `Only ${currentStock} items available.`);
+      if (newQty > item.stock) {
+        Alert.alert('Max Stock', `Only ${item.stock} items available.`);
         return;
       }
-      cartStore.updateQuantity(product._id, newQty, selectedSize, selectedColor);
+      cartStore.updateQuantity(key, newQty);
       Alert.alert('Quantity Updated', `${product.name} quantity increased to ${newQty}`);
       return;
     }
 
     setAddingToCart(true);
-    const item: CartItem = {
-      productId: product._id,
-      name: product.name,
-      price: product.price,
-      discountPrice: product.discountPrice,
-      quantity,
-      image: product.images?.[0] ?? 'https://via.placeholder.com/150',
-      stock: currentStock,
-      shopId: product.shopId?._id,
-      shopName: product.shopId?.shopName,
-      vendorId: product.vendor?._id,
-      vendorName: product.vendor?.name,
-      selectedSize,
-      selectedColor,
-    };
     cartStore.addItem(item);
     setAddingToCart(false);
 
@@ -228,52 +236,40 @@ export default function ProductDetailScreen() {
     ]);
   };
 
-  const handleBuyNow = async () => {
-    if (!product || product.stock === 0) return;
-    const token = await storage.getToken();
-    if (!token) {
-      Alert.alert('Login Required', 'Please sign in to proceed', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign In', onPress: () => router.push('/auth/login') },
-      ]);
+  // Buy Now keeps the rest of the cart: this item is added (or its quantity
+  // set) and checkout opens with only this item selected.
+  const handleBuyNow = () => {
+    if (!product) return;
+
+    const item = buildCartItem(product);
+    if (item.stock <= 0) {
+      Alert.alert('Out of Stock', outOfStockMessage());
       return;
     }
 
-    let currentStock = product.stock;
-    if (selectedSize && product.sizes) {
-      currentStock = product.sizes.find(s => s.size === selectedSize)?.stock || 0;
+    const cartStore = useCartStore.getState();
+    const key = cartItemKey(item);
+    const existingItem = cartStore.items.find((i) => cartItemKey(i) === key);
+    if (existingItem) {
+      cartStore.updateQuantity(key, quantity);
+    } else {
+      if (cartStore.getTotalItems() >= MAX_CART_UNITS) {
+        setShowBulkModal(true);
+        return;
+      }
+      cartStore.addItem(item);
     }
-    if (selectedColor && product.colors) {
-      currentStock = product.colors.find(c => c.name === selectedColor)?.stock || 0;
-    }
-    if (currentStock === 0) {
-      Alert.alert('Out of Stock', 'Selected variant is out of stock.');
-      return;
-    }
-
-    const item: CartItem = {
-      productId: product._id,
-      name: product.name,
-      price: product.price,
-      discountPrice: product.discountPrice,
-      quantity,
-      image: product.images?.[0] ?? '',
-      stock: currentStock,
-      shopId: product.shopId?._id,
-      shopName: product.shopId?.shopName,
-      selectedSize,
-      selectedColor,
-    };
-    useCartStore.getState().clearCart();
-    useCartStore.getState().addItem(item);
-    router.push('/(customer)/checkout');
+    router.push({ pathname: '/(customer)/checkout', params: { only: key } });
   };
 
   const handleShare = async () => {
     if (!product) return;
+    const price = selectedSize
+      ? selectedSize.discountPrice || selectedSize.price
+      : product.discountPrice || product.price;
     await Share.share({
-      message: `Check out ${product.name} on LinkAndSmile!\nPrice: ₹${product.discountPrice ?? product.price}\n${product.description?.slice(0, 100)}...`,
-      url: `https://linkn-smile.vercel.app/products/${product._id}`,
+      message: `Check out ${product.name} on LinkAndSmile!\nPrice: ₹${price}\n${product.description?.slice(0, 100)}...`,
+      url: `${links.website}/products/${product._id}`,
     });
   };
 
@@ -341,19 +337,15 @@ export default function ProductDetailScreen() {
     );
   }
 
-  const displayPrice = product.discountPrice ?? product.price;
-  const originalPrice = product.discountPrice ? product.price : null;
+  const basePrice = selectedSize ? selectedSize.price : product.price;
+  const salePrice = selectedSize ? selectedSize.discountPrice : product.discountPrice;
+  const displayPrice = salePrice || basePrice;
+  const originalPrice = salePrice ? basePrice : null;
   const discountPct = originalPrice
     ? Math.round(((originalPrice - displayPrice) / originalPrice) * 100)
     : 0;
 
-  let availableStock = product.stock;
-  if (selectedSize && product.sizes) {
-    availableStock = product.sizes.find(s => s.size === selectedSize)?.stock || 0;
-  }
-  if (selectedColor && product.colors) {
-    availableStock = product.colors.find(c => c.name === selectedColor)?.stock || 0;
-  }
+  const availableStock = selectedSize ? selectedSize.stock : product.stock;
 
   const avgRating = reviews.length
     ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
@@ -372,18 +364,18 @@ export default function ProductDetailScreen() {
               <TouchableOpacity style={styles.galleryBtn} onPress={handleShare}>
                 <Ionicons name="share-outline" size={20} color={Theme.colors.text} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.galleryBtn} onPress={toggleWishlist} disabled={wishlistLoading}>
+              <TouchableOpacity style={styles.galleryBtn} onPress={handleToggleFavourite} disabled={favouriteLoading}>
                 <Ionicons
-                  name={isWishlisted ? 'heart' : 'heart-outline'}
+                  name={isFavourite ? 'heart' : 'heart-outline'}
                   size={20}
-                  color={isWishlisted ? Theme.colors.danger : Theme.colors.text}
+                  color={isFavourite ? Theme.colors.danger : Theme.colors.text}
                 />
               </TouchableOpacity>
             </View>
           </View>
 
           <FlatList
-            data={product.images?.length ? product.images : ['https://via.placeholder.com/400']}
+            data={product.images?.length ? product.images : product.image ? [product.image] : []}
             horizontal pagingEnabled showsHorizontalScrollIndicator={false}
             onMomentumScrollEnd={(e) => setSelectedImage(Math.round(e.nativeEvent.contentOffset.x / width))}
             renderItem={({ item }) => (
@@ -435,57 +427,36 @@ export default function ProductDetailScreen() {
               </>
             )}
           </View>
-          <Text style={styles.taxInfo}>* Inclusive of all taxes | Shipping calculated at checkout</Text>
+          <Text style={styles.taxInfo}>* Free shipping · any taxes are shown at checkout</Text>
 
           {/* Sizes */}
           {product.sizes && product.sizes.length > 0 && (
             <View style={styles.variantSection}>
               <Text style={styles.variantLabel}>Size</Text>
               <View style={styles.variantOptions}>
-                {product.sizes.map((size) => (
+                {product.sizes.map((size, index) => (
                   <TouchableOpacity
-                    key={size.size}
+                    key={`${size.size}-${size.quantity}`}
                     style={[
                       styles.variantChip,
-                      selectedSize === size.size && styles.variantChipActive,
+                      selectedSizeIndex === index && styles.variantChipActive,
                       size.stock === 0 && styles.variantChipDisabled,
                     ]}
-                    onPress={() => size.stock > 0 && setSelectedSize(size.size)}
+                    onPress={() => {
+                      if (size.stock <= 0) return;
+                      setSelectedSizeIndex(index);
+                      setQuantity(1);
+                    }}
                     disabled={size.stock === 0}
                   >
                     <Text style={[
                       styles.variantChipText,
-                      selectedSize === size.size && styles.variantChipTextActive,
+                      selectedSizeIndex === index && styles.variantChipTextActive,
                       size.stock === 0 && styles.variantChipTextDisabled,
                     ]}>
-                      {size.size}
+                      {size.size}{size.quantity ? ` · ${size.quantity}${size.unit ?? ''}` : ''}
                     </Text>
                     {size.stock === 0 && <Text style={styles.outOfStockLabel}>Out</Text>}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* Colors */}
-          {product.colors && product.colors.length > 0 && (
-            <View style={styles.variantSection}>
-              <Text style={styles.variantLabel}>Color</Text>
-              <View style={styles.variantOptions}>
-                {product.colors.map((color) => (
-                  <TouchableOpacity
-                    key={color.name}
-                    style={[
-                      styles.colorChip, { backgroundColor: color.hex },
-                      selectedColor === color.name && styles.colorChipActive,
-                      color.stock === 0 && styles.colorChipDisabled,
-                    ]}
-                    onPress={() => color.stock > 0 && setSelectedColor(color.name)}
-                    disabled={color.stock === 0}
-                  >
-                    {selectedColor === color.name && (
-                      <Ionicons name="checkmark" size={14} color="#fff" />
-                    )}
                   </TouchableOpacity>
                 ))}
               </View>
@@ -708,10 +679,10 @@ export default function ProductDetailScreen() {
               <Ionicons name="bulb-outline" size={32} color={Theme.colors.warning} />
             </View>
             <Text style={styles.modalTitle}>Need a bulk order?</Text>
-            <Text style={styles.modalSub}>You've hit the 5-item limit. Contact us for bulk pricing.</Text>
-            <TouchableOpacity style={styles.modalCallBtn} onPress={() => Linking.openURL('tel:+919820623835')}>
+            <Text style={styles.modalSub}>You&apos;ve hit the {MAX_CART_UNITS}-item limit. Contact us for bulk pricing.</Text>
+            <TouchableOpacity style={styles.modalCallBtn} onPress={() => Linking.openURL(telUrl(support.phone))}>
               <Ionicons name="call-outline" size={18} color={Theme.colors.white} />
-              <Text style={styles.modalCallText}>Call +91 9820623835</Text>
+              <Text style={styles.modalCallText}>Call {support.phone}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.modalDismiss} onPress={() => setShowBulkModal(false)}>
               <Text style={styles.modalDismissText}>Continue Shopping</Text>

@@ -7,34 +7,30 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useCartStore } from '../../store/cart.store';
-import { storage } from '../../utils/storage';
+import { useAuthStore } from '../../store/auth.store';
+import { telUrl, useSupportContacts } from '../../store/app-config.store';
+import { cartItemKey, MAX_CART_UNITS, unitPrice, useCartStore, type CartItem } from '../../store/cart.store';
 import { Theme } from '../../constants/theme';
 
 export default function CartScreen() {
   const { items, removeItem, updateQuantity, getTotalPrice, getTotalItems, clearCart, isLoading, loadCart } = useCartStore();
   const [showBulkModal, setShowBulkModal] = useState(false);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const isLoggedIn = useAuthStore((s) => !!s.user);
+  const support = useSupportContacts();
 
   useEffect(() => {
-    (async () => {
-      const token = await storage.getToken();
-      setIsLoggedIn(!!token);
-      if (token) await loadCart();
-    })();
-  }, []);
+    if (isLoggedIn) void loadCart();
+  }, [isLoggedIn, loadCart]);
 
-  const handleUpdateQuantity = (item: any, newQty: number) => {
-    const sizeKey = item.selectedSize ? `${item.selectedSize.size}-${item.selectedSize.quantity}` : undefined;
-    if (newQty > item.quantity && getTotalItems() >= 5) { setShowBulkModal(true); return; }
-    updateQuantity(item.productId, newQty, sizeKey);
+  const handleUpdateQuantity = (item: CartItem, newQty: number) => {
+    if (newQty > item.quantity && getTotalItems() >= MAX_CART_UNITS) { setShowBulkModal(true); return; }
+    updateQuantity(cartItemKey(item), newQty);
   };
 
-  const handleRemove = (item: any) => {
-    const sizeKey = item.selectedSize ? `${item.selectedSize.size}-${item.selectedSize.quantity}` : undefined;
+  const handleRemove = (item: CartItem) => {
     Alert.alert('Remove Item', `Remove ${item.name} from cart?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => removeItem(item.productId, sizeKey) },
+      { text: 'Remove', style: 'destructive', onPress: () => removeItem(cartItemKey(item)) },
     ]);
   };
 
@@ -46,7 +42,9 @@ export default function CartScreen() {
       ]);
       return;
     }
-    router.push('/(customer)/checkout');
+    // `only: ''` clears a selection left over from an earlier "Buy Now"
+    // (tab screens keep their previous params).
+    router.push({ pathname: '/(customer)/checkout', params: { only: '' } });
   };
 
   const totalPrice = getTotalPrice();
@@ -106,15 +104,15 @@ export default function CartScreen() {
       </View>
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
-        {items.map((item, index) => (
-          <View key={`${item.productId}-${index}`} style={styles.cartItem}>
-            <Image source={{ uri: item.image ?? 'https://via.placeholder.com/100' }} style={styles.itemImg} />
+        {items.map((item) => (
+          <View key={cartItemKey(item)} style={styles.cartItem}>
+            <Image source={item.image ? { uri: item.image } : undefined} style={styles.itemImg} />
             <View style={styles.itemDetails}>
               <Text style={styles.itemName} numberOfLines={2}>{item.name}</Text>
               <Text style={styles.itemShop}>by {item.shopName ?? 'LinkAndSmile'}</Text>
               {item.selectedSize && (
                 <Text style={styles.itemSize}>
-                  {item.selectedSize.size} · {item.selectedSize.quantity}{item.selectedSize.unit}
+                  {item.selectedSize.size} · {item.selectedSize.quantity}{item.selectedSize.unit ?? ''}
                 </Text>
               )}
               <View style={styles.itemBottom}>
@@ -137,9 +135,9 @@ export default function CartScreen() {
                 </View>
                 <View>
                   <Text style={styles.itemPrice}>
-                    ₹{((item.discountPrice ?? item.price) * item.quantity).toFixed(0)}
+                    ₹{(unitPrice(item) * item.quantity).toFixed(0)}
                   </Text>
-                  <Text style={styles.itemUnitPrice}>₹{item.discountPrice ?? item.price} each</Text>
+                  <Text style={styles.itemUnitPrice}>₹{unitPrice(item)} each</Text>
                 </View>
               </View>
             </View>
@@ -160,16 +158,10 @@ export default function CartScreen() {
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Shipping</Text>
-            <Text style={[styles.summaryVal, { color: Theme.colors.success }]}>
-              {totalPrice > 499 ? 'FREE' : '₹49'}
-            </Text>
+            <Text style={[styles.summaryVal, { color: Theme.colors.success }]}>FREE</Text>
           </View>
-          <View style={[styles.summaryRow, styles.totalRow]}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalVal}>
-              ₹{(totalPrice + (totalPrice > 499 ? 0 : 49)).toFixed(0)}
-            </Text>
-          </View>
+          {/* The exact amount (coupons, taxes) is priced by the server at checkout. */}
+          <Text style={styles.summaryNote}>Taxes and coupons are applied at checkout.</Text>
         </View>
         <TouchableOpacity style={styles.checkoutBtn} onPress={handleCheckout} activeOpacity={0.85}>
           <Ionicons name="lock-closed-outline" size={18} color={Theme.colors.white} />
@@ -189,11 +181,11 @@ export default function CartScreen() {
             </View>
             <Text style={styles.modalTitle}>Need a bulk order?</Text>
             <Text style={styles.modalSub}>
-              You've reached the 5-item limit. Contact our team for bulk pricing and dedicated service.
+              You&apos;ve reached the {MAX_CART_UNITS}-item limit. Contact our team for bulk pricing and dedicated service.
             </Text>
-            <TouchableOpacity style={styles.modalCallBtn} onPress={() => Linking.openURL('tel:+919820623835')}>
+            <TouchableOpacity style={styles.modalCallBtn} onPress={() => Linking.openURL(telUrl(support.phone))}>
               <Ionicons name="call-outline" size={18} color={Theme.colors.white} />
-              <Text style={styles.modalCallText}>Call +91 9820623835</Text>
+              <Text style={styles.modalCallText}>Call {support.phone}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.modalDismiss} onPress={() => setShowBulkModal(false)}>
               <Text style={styles.modalDismissText}>Continue Shopping</Text>
@@ -265,9 +257,7 @@ const styles = StyleSheet.create({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   summaryLabel: { fontSize: Theme.font.sm, color: Theme.colors.textSecondary },
   summaryVal: { fontSize: Theme.font.sm, fontWeight: '500', color: Theme.colors.text },
-  totalRow: { marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: Theme.colors.borderLight },
-  totalLabel: { fontSize: Theme.font.md, fontWeight: '700', color: Theme.colors.text },
-  totalVal: { fontSize: Theme.font.lg, fontWeight: '800', color: Theme.colors.primary },
+  summaryNote: { fontSize: Theme.font.xs, color: Theme.colors.textMuted, marginTop: 2 },
 
   checkoutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
