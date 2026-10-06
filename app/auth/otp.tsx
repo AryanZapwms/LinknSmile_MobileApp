@@ -1,5 +1,5 @@
 // app/auth/otp.tsx
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,27 +13,30 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../services/api';
-import { useAuthStore } from '../../store/auth.store';
+import { apiClient } from '../../services/api-client';
+import { errorMessage } from '../../services/api-error';
 import { Theme } from '../../constants/theme';
 
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN = 30;
 
+// Used for two flows, chosen by the `flow` param:
+//   register → verifies the sign-up code, then sends the user to sign in
+//   reset    → checks the password-reset code, then opens the new-password screen
 export default function OTPScreen() {
   const { email, flow } = useLocalSearchParams<{ email: string; flow: 'register' | 'reset' }>();
+  const isReset = flow === 'reset';
   const [digits, setDigits] = useState<string[]>(Array(OTP_LENGTH).fill(''));
   const [isVerifying, setIsVerifying] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [countdown, setCountdown] = useState(RESEND_COOLDOWN);
-  const [canResend, setCanResend] = useState(false);
+  const canResend = countdown <= 0;
 
   const inputRefs = useRef<(TextInput | null)[]>(Array(OTP_LENGTH).fill(null));
-  const { login } = useAuthStore();
 
   // Countdown timer
   useEffect(() => {
-    if (countdown <= 0) { setCanResend(true); return; }
+    if (countdown <= 0) return;
     const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
     return () => clearTimeout(timer);
   }, [countdown]);
@@ -42,11 +45,11 @@ export default function OTPScreen() {
   const isComplete = otp.length === OTP_LENGTH && digits.every((d) => d !== '');
 
   const handleDigitChange = (value: string, index: number) => {
-    // Handle paste — if pasting full OTP
-    if (value.length === OTP_LENGTH) {
-      const newDigits = value.slice(0, OTP_LENGTH).split('');
-      setDigits(newDigits);
+    // Pasting the whole code into one box fills all of them.
+    if (value.length === OTP_LENGTH && /^\d+$/.test(value)) {
+      setDigits(value.split(''));
       inputRefs.current[OTP_LENGTH - 1]?.focus();
+      void verifyCode(value);
       return;
     }
 
@@ -60,6 +63,7 @@ export default function OTPScreen() {
     if (value && index < OTP_LENGTH - 1) {
       inputRefs.current[index + 1]?.focus();
     }
+    if (newDigits.every((d) => d !== '')) void verifyCode(newDigits.join(''));
   };
 
   const handleKeyPress = (key: string, index: number) => {
@@ -77,56 +81,53 @@ export default function OTPScreen() {
     }
   };
 
-  const handleVerify = useCallback(async () => {
-    if (!isComplete) return;
+  const clearCode = () => {
+    setDigits(Array(OTP_LENGTH).fill(''));
+    inputRefs.current[0]?.focus();
+  };
+
+  const verifyCode = async (code: string) => {
+    if (code.length !== OTP_LENGTH || isVerifying || !email) return;
     Keyboard.dismiss();
     setIsVerifying(true);
 
     try {
-      const endpoint = flow === 'reset' ? '/api/auth/verify-reset-otp' : '/api/auth/verify-otp';
-      await api.post(endpoint, { email, otp });
-
-      if (flow === 'reset') {
-        router.replace({ pathname: '/auth/reset-password' as any, params: { email, otp } });
+      if (isReset) {
+        // The code is checked again (and used up) when the new password is saved.
+        await apiClient.auth.verifyResetOtp(email, code);
+        router.replace({ pathname: '/auth/reset-password', params: { email, otp: code } });
       } else {
-        // Registration verified — go to login
+        await apiClient.auth.verifyOtp(email, code);
         Alert.alert(
           'Account Verified! 🎉',
           'Your account has been created successfully. Please sign in.',
           [{ text: 'Sign In', onPress: () => router.replace('/auth/login') }]
         );
       }
-    } catch (error: any) {
-      const message = error.response?.data?.error || error.response?.data?.message || 'Invalid or expired OTP';
-      Alert.alert('Verification Failed', message);
-      // Clear the OTP boxes on failure
-      setDigits(Array(OTP_LENGTH).fill(''));
-      inputRefs.current[0]?.focus();
+    } catch (error) {
+      Alert.alert('Verification Failed', errorMessage(error, 'Invalid or expired code.'));
+      clearCode();
     } finally {
       setIsVerifying(false);
     }
-  }, [otp, email, flow, isComplete]);
+  };
 
-  // Auto-verify when all digits are filled
-  useEffect(() => {
-    if (isComplete) handleVerify();
-  }, [isComplete]);
+  const handleVerify = () => verifyCode(otp);
 
   const handleResend = async () => {
-    if (!canResend) return;
+    if (!canResend || !email) return;
     setIsResending(true);
-    setCanResend(false);
     setCountdown(RESEND_COOLDOWN);
 
     try {
-      await api.post('/api/auth/resend-otp', { email });
-      setDigits(Array(OTP_LENGTH).fill(''));
-      inputRefs.current[0]?.focus();
-      Alert.alert('OTP Sent', `A new code has been sent to ${email}`);
-    } catch (error: any) {
-      const message = error.response?.data?.error || 'Failed to resend OTP';
-      Alert.alert('Error', message);
-      setCanResend(true);
+      // Each flow has its own kind of code.
+      if (isReset) await apiClient.auth.forgotPassword(email);
+      else await apiClient.auth.resendOtp(email);
+      clearCode();
+      Alert.alert('Code Sent', `A new code has been sent to ${email}`);
+    } catch (error) {
+      Alert.alert('Error', errorMessage(error, 'Could not resend the code.'));
+      setCountdown(0); // let them try again straight away
     } finally {
       setIsResending(false);
     }
@@ -190,7 +191,7 @@ export default function OTPScreen() {
 
         {/* Resend */}
         <View style={styles.resendRow}>
-          <Text style={styles.resendLabel}>Didn't receive the code? </Text>
+          <Text style={styles.resendLabel}>Didn&apos;t receive the code? </Text>
           {canResend ? (
             <TouchableOpacity onPress={handleResend} disabled={isResending}>
               {isResending ? (
@@ -208,7 +209,7 @@ export default function OTPScreen() {
         <View style={styles.infoBox}>
           <Ionicons name="information-circle-outline" size={16} color={Theme.colors.primary} />
           <Text style={styles.infoText}>
-            Check your spam folder if you don't see the email.
+            Check your spam folder if you don&apos;t see the email.
           </Text>
         </View>
       </View>

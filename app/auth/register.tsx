@@ -1,5 +1,7 @@
 // app/auth/register.tsx
-import React, { useState, useRef } from 'react';
+// Customer and seller sign-up. Both end on the OTP screen: the account (and,
+// for sellers, the shop) is only created once the emailed code is verified.
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,120 +9,88 @@ import {
   TouchableOpacity,
   ScrollView,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   TextInput,
   Animated,
   ActivityIndicator,
   Alert,
+  type KeyboardTypeOptions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../services/api';
+import { apiClient } from '../../services/api-client';
+import { errorMessage, retryAfterText, toApiError } from '../../services/api-error';
+import { customerRegisterSchema, fieldErrors, vendorRegisterSchema } from '../../services/form-schemas';
+import { useAppLinks } from '../../store/app-config.store';
 import { Theme } from '../../constants/theme';
 
 type Role = 'customer' | 'vendor';
 
-export default function RegisterScreen() {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [role, setRole] = useState<Role>('customer');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+const EMPTY_FORM = {
+  name: '',
+  email: '',
+  phone: '',
+  password: '',
+  confirmPassword: '',
+  shopName: '',
+  description: '',
+  street: '',
+  city: '',
+  state: '',
+  pincode: '',
+  gstNumber: '',
+  panNumber: '',
+};
+type FormState = typeof EMPTY_FORM;
+type FieldName = keyof FormState;
 
-  const [errors, setErrors] = useState<Record<string, string>>({});
+interface FieldProps {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  error?: string;
+  placeholder?: string;
+  keyboardType?: KeyboardTypeOptions;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  maxLength?: number;
+  multiline?: boolean;
+  /** Password fields: hidden unless `visible`; shows the eye toggle. */
+  secure?: boolean;
+  visible?: boolean;
+  onToggleVisible?: () => void;
+}
 
-  const emailRef = useRef<TextInput>(null);
-  const passwordRef = useRef<TextInput>(null);
-  const confirmRef = useRef<TextInput>(null);
-  const shakeAnim = useRef(new Animated.Value(0)).current;
-
-  const shake = () => {
-    Animated.sequence([
-      Animated.timing(shakeAnim, { toValue: 10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -10, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 6, duration: 60, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 0, duration: 60, useNativeDriver: true }),
-    ]).start();
-  };
-
-  const validate = () => {
-    const newErrors: Record<string, string> = {};
-    if (!name.trim()) newErrors.name = 'Full name is required';
-    else if (name.trim().length < 2) newErrors.name = 'Name must be at least 2 characters';
-
-    if (!email.trim()) newErrors.email = 'Email is required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) newErrors.email = 'Enter a valid email';
-
-    if (!password) newErrors.password = 'Password is required';
-    else if (password.length < 6) newErrors.password = 'Minimum 6 characters';
-
-    if (!confirmPassword) newErrors.confirmPassword = 'Please confirm your password';
-    else if (password !== confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const clearError = (field: string) => {
-    setErrors((prev) => { const next = { ...prev }; delete next[field]; return next; });
-  };
-
-  const handleRegister = async () => {
-    if (!validate()) { shake(); return; }
-
-    setIsLoading(true);
-    try {
-      const endpoint = role === 'vendor' ? '/api/auth/register-vendor' : '/api/auth/register';
-      await api.post(endpoint, {
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
-        password,
-        role,
-      });
-
-      // Navigate to OTP verification
-      router.push({ pathname: '/auth/otp', params: { email: email.trim().toLowerCase(), flow: 'register' } });
-    } catch (error: any) {
-      const message =
-        error.response?.data?.error ||
-        error.response?.data?.message ||
-        'Registration failed. Please try again.';
-      Alert.alert('Registration Failed', message);
-      shake();
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const Field = ({
-    label, value, onChange, placeholder, secure, showToggle, onToggle,
-    inputRef, nextRef, keyboardType, error, field,
-  }: any) => (
+// Defined outside the screen component on purpose: a component created inside
+// render is a new type on every keystroke, which remounts the input and drops
+// the keyboard focus.
+function Field({
+  label, value, onChangeText, error, placeholder, keyboardType, autoCapitalize,
+  maxLength, multiline, secure, visible, onToggleVisible,
+}: FieldProps) {
+  return (
     <View style={styles.fieldWrapper}>
       <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={[styles.inputRow, error ? styles.inputRowError : null]}>
+      <View style={[styles.inputRow, multiline && styles.inputRowMultiline, error ? styles.inputRowError : null]}>
         <TextInput
-          ref={inputRef}
-          style={styles.input}
+          style={[styles.input, multiline && styles.inputMultiline]}
           placeholder={placeholder}
           placeholderTextColor={Theme.colors.textMuted}
           value={value}
-          onChangeText={(v) => { onChange(v); clearError(field); }}
-          secureTextEntry={secure && !showToggle}
-          keyboardType={keyboardType || 'default'}
-          autoCapitalize={keyboardType === 'email-address' ? 'none' : 'words'}
-          returnKeyType={nextRef ? 'next' : 'done'}
-          onSubmitEditing={() => nextRef?.current?.focus()}
-          blurOnSubmit={!nextRef}
+          onChangeText={onChangeText}
+          secureTextEntry={secure && !visible}
+          keyboardType={keyboardType ?? 'default'}
+          autoCapitalize={autoCapitalize ?? (keyboardType === 'email-address' || secure ? 'none' : 'words')}
+          autoCorrect={false}
+          maxLength={maxLength}
+          multiline={multiline}
+          textAlignVertical={multiline ? 'top' : 'center'}
         />
-        {secure !== undefined && (
-          <TouchableOpacity onPress={onToggle} style={styles.eyeButton}>
+        {secure && (
+          <TouchableOpacity onPress={onToggleVisible} style={styles.eyeButton}>
             <Ionicons
-              name={showToggle ? 'eye-off-outline' : 'eye-outline'}
+              name={visible ? 'eye-off-outline' : 'eye-outline'}
               size={18}
               color={Theme.colors.textMuted}
             />
@@ -130,6 +100,92 @@ export default function RegisterScreen() {
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
     </View>
   );
+}
+
+export default function RegisterScreen() {
+  const [role, setRole] = useState<Role>('customer');
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const links = useAppLinks();
+
+  const [shakeAnim] = useState(() => new Animated.Value(0));
+  const shake = () => {
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 10, duration: 60, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 60, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 6, duration: 60, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0, duration: 60, useNativeDriver: true }),
+    ]).start();
+  };
+
+  /** Props shared by every field: value, change handler (clears its error), error. */
+  const bind = (field: FieldName) => ({
+    value: form[field],
+    error: errors[field],
+    onChangeText: (value: string) => {
+      setForm((prev) => ({ ...prev, [field]: value }));
+      setErrors((prev) => {
+        if (!prev[field]) return prev;
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+    },
+  });
+
+  const handleRegister = async () => {
+    if (isLoading) return;
+
+    // Validate with the schema for the chosen role; `send` is the matching request.
+    let email: string;
+    let send: () => Promise<unknown>;
+    if (role === 'vendor') {
+      const parsed = vendorRegisterSchema.safeParse(form);
+      if (!parsed.success) {
+        setErrors(fieldErrors(parsed.error));
+        shake();
+        return;
+      }
+      const { confirmPassword: _confirm, ...vendor } = parsed.data;
+      email = vendor.email;
+      send = () =>
+        apiClient.auth.registerVendor({
+          ...vendor,
+          description: vendor.description || undefined,
+          gstNumber: vendor.gstNumber || undefined,
+          panNumber: vendor.panNumber || undefined,
+        });
+    } else {
+      const parsed = customerRegisterSchema.safeParse(form);
+      if (!parsed.success) {
+        setErrors(fieldErrors(parsed.error));
+        shake();
+        return;
+      }
+      email = parsed.data.email;
+      send = () => apiClient.auth.registerCustomer(parsed.data);
+    }
+    setErrors({});
+
+    setIsLoading(true);
+    try {
+      await send();
+      router.push({ pathname: '/auth/otp', params: { email, flow: 'register' } });
+    } catch (error) {
+      const apiError = toApiError(error);
+      const message =
+        apiError.status === 429
+          ? `Too many attempts. ${retryAfterText(apiError.retryAfterSeconds)}`
+          : errorMessage(apiError, 'Registration failed. Please try again.');
+      Alert.alert('Registration Failed', message);
+      shake();
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -139,12 +195,10 @@ export default function RegisterScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Back button */}
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color={Theme.colors.text} />
           </TouchableOpacity>
 
-          {/* Header */}
           <View style={styles.header}>
             <View style={styles.logoCircle}>
               <Ionicons name="person-add-outline" size={28} color={Theme.colors.white} />
@@ -154,13 +208,13 @@ export default function RegisterScreen() {
           </View>
 
           <Animated.View style={[styles.card, { transform: [{ translateX: shakeAnim }] }]}>
-            {/* Role Toggle */}
+            {/* Role toggle */}
             <View style={styles.roleSection}>
               <Text style={styles.fieldLabel}>I want to</Text>
               <View style={styles.roleToggle}>
                 <TouchableOpacity
                   style={[styles.roleOption, role === 'customer' && styles.roleOptionActive]}
-                  onPress={() => setRole('customer')}
+                  onPress={() => { setRole('customer'); setErrors({}); }}
                 >
                   <Ionicons
                     name="bag-handle-outline"
@@ -173,7 +227,7 @@ export default function RegisterScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.roleOption, role === 'vendor' && styles.roleOptionActive]}
-                  onPress={() => setRole('vendor')}
+                  onPress={() => { setRole('vendor'); setErrors({}); }}
                 >
                   <Ionicons
                     name="storefront-outline"
@@ -187,38 +241,83 @@ export default function RegisterScreen() {
               </View>
             </View>
 
-            {/* Fields */}
+            {role === 'vendor' && <Text style={styles.sectionTitle}>Your details</Text>}
+            <Field label="Full Name" placeholder="John Doe" {...bind('name')} />
             <Field
-              label="Full Name" field="name" value={name} onChange={setName}
-              placeholder="John Doe" nextRef={emailRef} error={errors.name}
+              label="Email Address" placeholder="you@example.com"
+              keyboardType="email-address" {...bind('email')}
+            />
+            {role === 'vendor' && (
+              <Field
+                label="Mobile Number" placeholder="10-digit mobile number"
+                keyboardType="phone-pad" maxLength={10} {...bind('phone')}
+              />
+            )}
+            <Field
+              label="Password" placeholder="Min. 6 characters" secure
+              visible={showPassword} onToggleVisible={() => setShowPassword((v) => !v)}
+              {...bind('password')}
             />
             <Field
-              label="Email Address" field="email" value={email} onChange={setEmail}
-              placeholder="you@example.com" inputRef={emailRef} nextRef={passwordRef}
-              keyboardType="email-address" error={errors.email}
-            />
-            <Field
-              label="Password" field="password" value={password} onChange={setPassword}
-              placeholder="Min. 6 characters" secure inputRef={passwordRef}
-              nextRef={confirmRef} showToggle={showPassword} onToggle={() => setShowPassword(!showPassword)}
-              error={errors.password}
-            />
-            <Field
-              label="Confirm Password" field="confirmPassword" value={confirmPassword}
-              onChange={setConfirmPassword} placeholder="Re-enter password" secure
-              inputRef={confirmRef} showToggle={showConfirm} onToggle={() => setShowConfirm(!showConfirm)}
-              error={errors.confirmPassword}
+              label="Confirm Password" placeholder="Re-enter password" secure
+              visible={showConfirm} onToggleVisible={() => setShowConfirm((v) => !v)}
+              {...bind('confirmPassword')}
             />
 
-            {/* Terms note */}
+            {role === 'vendor' && (
+              <>
+                <Text style={styles.sectionTitle}>Your shop</Text>
+                <Field label="Shop Name" placeholder="e.g. Asha Handlooms" {...bind('shopName')} />
+                <Field
+                  label="About your shop (optional)" placeholder="What do you sell?"
+                  autoCapitalize="sentences" multiline {...bind('description')}
+                />
+                <Field
+                  label="Street Address" placeholder="Shop no., building, street"
+                  autoCapitalize="sentences" {...bind('street')}
+                />
+                <View style={styles.row}>
+                  <View style={styles.rowItem}>
+                    <Field label="City" placeholder="Mumbai" {...bind('city')} />
+                  </View>
+                  <View style={styles.rowItem}>
+                    <Field label="State" placeholder="Maharashtra" {...bind('state')} />
+                  </View>
+                </View>
+                <Field
+                  label="PIN Code" placeholder="6-digit PIN code"
+                  keyboardType="number-pad" maxLength={6} {...bind('pincode')}
+                />
+                <View style={styles.row}>
+                  <View style={styles.rowItem}>
+                    <Field
+                      label="GST No. (optional)" placeholder="GSTIN"
+                      autoCapitalize="characters" maxLength={15} {...bind('gstNumber')}
+                    />
+                  </View>
+                  <View style={styles.rowItem}>
+                    <Field
+                      label="PAN (optional)" placeholder="PAN"
+                      autoCapitalize="characters" maxLength={10} {...bind('panNumber')}
+                    />
+                  </View>
+                </View>
+                <View style={styles.infoBox}>
+                  <Ionicons name="information-circle-outline" size={16} color={Theme.colors.primary} />
+                  <Text style={styles.infoText}>
+                    After you verify your email, our team reviews your shop. You can start listing products once it is approved.
+                  </Text>
+                </View>
+              </>
+            )}
+
             <Text style={styles.termsText}>
               By registering, you agree to our{' '}
-              <Text style={styles.termsLink}>Terms of Service</Text>
+              <Text style={styles.termsLink} onPress={() => Linking.openURL(links.terms)}>Terms of Service</Text>
               {' '}and{' '}
-              <Text style={styles.termsLink}>Privacy Policy</Text>
+              <Text style={styles.termsLink} onPress={() => Linking.openURL(links.privacyPolicy)}>Privacy Policy</Text>
             </Text>
 
-            {/* Submit */}
             <TouchableOpacity
               style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
               onPress={handleRegister}
@@ -234,7 +333,6 @@ export default function RegisterScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Divider */}
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
               <Text style={styles.dividerText}>Already have an account?</Text>
@@ -294,6 +392,13 @@ const styles = StyleSheet.create({
   roleOptionText: { fontSize: Theme.font.md, fontWeight: '600', color: Theme.colors.textSecondary },
   roleOptionTextActive: { color: Theme.colors.white },
 
+  sectionTitle: {
+    fontSize: Theme.font.md, fontWeight: '700', color: Theme.colors.text,
+    marginTop: Theme.spacing.sm, marginBottom: Theme.spacing.md,
+  },
+  row: { flexDirection: 'row', gap: Theme.spacing.sm },
+  rowItem: { flex: 1 },
+
   fieldWrapper: { marginBottom: Theme.spacing.md },
   fieldLabel: { fontSize: Theme.font.sm, fontWeight: '600', color: Theme.colors.text, marginBottom: 6 },
   inputRow: {
@@ -302,10 +407,19 @@ const styles = StyleSheet.create({
     borderRadius: Theme.radius.md, backgroundColor: Theme.colors.surfaceSecondary,
     paddingHorizontal: Theme.spacing.md, height: 50,
   },
+  inputRowMultiline: { height: 84, alignItems: 'flex-start', paddingVertical: Theme.spacing.sm },
   inputRowError: { borderColor: Theme.colors.danger, backgroundColor: '#FFF5F3' },
   input: { flex: 1, fontSize: Theme.font.md, color: Theme.colors.text, height: '100%' },
+  inputMultiline: { height: '100%' },
   eyeButton: { padding: Theme.spacing.xs },
   errorText: { fontSize: 12, color: Theme.colors.danger, marginTop: 4, marginLeft: 2 },
+
+  infoBox: {
+    flexDirection: 'row', gap: Theme.spacing.sm, alignItems: 'flex-start',
+    backgroundColor: Theme.colors.primarySurface,
+    borderRadius: Theme.radius.md, padding: Theme.spacing.md, marginBottom: Theme.spacing.md,
+  },
+  infoText: { flex: 1, fontSize: 12, color: Theme.colors.text, lineHeight: 18 },
 
   termsText: { fontSize: 12, color: Theme.colors.textMuted, textAlign: 'center', marginBottom: Theme.spacing.lg, lineHeight: 18 },
   termsLink: { color: Theme.colors.primary, fontWeight: '500' },
