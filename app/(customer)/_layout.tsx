@@ -1,49 +1,13 @@
+// app/(customer)/_layout.tsx
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useCartStore } from '../../store/cart.store';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native'; // ← added TouchableOpacity
+import { View, Text, StyleSheet, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCartStore } from '../../store/cart.store';
 import { Theme } from '../../constants/theme';
 
-// Logging tab bar to see which routes are being rendered
-function LoggingTabBar({ state, descriptors, navigation }: any) {
-  console.log('[TabBar] Current routes:', state.routes.map(r => r.name));
-  console.log('[TabBar] Index:', state.index);
-  
-  const insets = useSafeAreaInsets();
-  return (
-    <View style={{ flexDirection: 'row', backgroundColor: Theme.colors.tabBar, paddingBottom: insets.bottom }}>
-      {state.routes.map((route, index) => {
-        const isFocused = state.index === index;
-        const onPress = () => {
-          const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-          if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
-        };
-        return (
-          <TouchableOpacity key={route.key} onPress={onPress} style={{ flex: 1, alignItems: 'center', paddingVertical: 8 }}>
-            <Ionicons name={getIconName(route.name)} size={24} color={isFocused ? Theme.colors.primary : Theme.colors.tabInactive} />
-            <Text style={{ fontSize: 11, color: isFocused ? Theme.colors.primary : Theme.colors.tabInactive }}>
-              {route.name === 'home' ? 'Home' : route.name === 'cart' ? 'Cart' : route.name === 'orders' ? 'Orders' : route.name === 'profile' ? 'Profile' : route.name}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-}
-
-function getIconName(routeName: string): string {
-  switch(routeName) {
-    case 'home': return 'home-outline';
-    case 'cart': return 'cart-outline';
-    case 'orders': return 'receipt-outline';
-    case 'profile': return 'person-outline';
-    default: return 'help-outline';
-  }
-}
-
-function CartTabIcon({ color, size }: { color: string; size: number }) {
-  const totalItems = useCartStore((s) => s.getTotalItems());
+function CartTabIcon({ color, size }: { color: ColorValue; size: number }) {
+  const totalItems = useCartStore((s) => s.items.reduce((sum, item) => sum + item.quantity, 0));
   return (
     <View>
       <Ionicons name="cart-outline" size={size} color={color} />
@@ -56,25 +20,24 @@ function CartTabIcon({ color, size }: { color: string; size: number }) {
   );
 }
 
-// List of all screens you want to hide from the tab bar
+// Screens in this group that are opened with router.push and must not get a tab.
 const HIDDEN_SCREENS = [
   'checkout',
   'product/list',
   'product/[id]',
   'order-success/[id]',
   'profile/orders/[id]',
-  'addresses',          // 👈 add this
-  'edit-profile',       // 👈 add this
-  'change-password',    // 👈 add this
-  'notifications',      // 👈 add this
-  'terms',              // 👈 add this
-  'wishlist',           // if you have it
+  'addresses',
+  'edit-profile',
+  'change-password',
+  'notifications',
+  'terms',
+  'favourites',
+  'delete-account',
 ];
 
 export default function CustomerLayout() {
   const insets = useSafeAreaInsets();
-  console.log('[CustomerLayout] Rendering tabs. Visible screens: Home, Cart, Orders, Profile');
-  console.log('[CustomerLayout] Hidden screens:', HIDDEN_SCREENS);
 
   return (
     <Tabs
@@ -91,8 +54,6 @@ export default function CustomerLayout() {
         tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
         headerShown: false,
       }}
-    //   tabBar={(props) => <LoggingTabBar {...props} />
-    // }   // ← use custom tab bar for logging
     >
       <Tabs.Screen
         name="home"
@@ -123,7 +84,6 @@ export default function CustomerLayout() {
         }}
       />
 
-      {/* Explicitly hide all unwanted screens */}
       {HIDDEN_SCREENS.map((screenName) => (
         <Tabs.Screen key={screenName} name={screenName} options={{ href: null }} />
       ))}

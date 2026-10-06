@@ -9,6 +9,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth.store';
 import { api } from '../../services/api';
+import { telUrl, useSupportContacts, whatsappUrl } from '../../store/app-config.store';
 import { Theme } from '../../constants/theme';
 
 interface VendorStats {
@@ -20,6 +21,7 @@ interface VendorStats {
 
 export default function VendorProfileScreen() {
   const { user, logout } = useAuthStore();
+  const support = useSupportContacts();
   const [stats, setStats] = useState<VendorStats>({
     totalProducts: 0, totalOrders: 0, totalRevenue: 0, walletBalance: 0,
   });
@@ -119,6 +121,12 @@ const fetchStats = useCallback(async () => {
           sub: 'Order & payout alerts',
           onPress: () => router.push('/(vendor)/notifications'),
         },
+        {
+          icon: 'trash-outline',
+          label: 'Delete Account',
+          sub: 'Close your shop and delete your account',
+          onPress: () => router.push('/(vendor)/delete-account'),
+        },
       ],
     },
     {
@@ -127,14 +135,14 @@ const fetchStats = useCallback(async () => {
         {
           icon: 'call-outline',
           label: 'Call Support',
-          sub: '+91 9820623835',
-          onPress: () => Linking.openURL('tel:+919820623835'),
+          sub: support.phone,
+          onPress: () => Linking.openURL(telUrl(support.phone)),
         },
         {
           icon: 'chatbubble-outline',
           label: 'WhatsApp Us',
           sub: 'Chat with our team',
-          onPress: () => Linking.openURL('whatsapp://send?phone=919820623835'),
+          onPress: () => Linking.openURL(whatsappUrl(support.phone)),
         },
         {
           icon: 'document-text-outline',

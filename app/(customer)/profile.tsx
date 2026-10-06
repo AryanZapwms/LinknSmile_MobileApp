@@ -9,6 +9,8 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth.store';
 import { api } from '../../services/api';
+import { telUrl, useAppLinks, useSupportContacts, whatsappUrl } from '../../store/app-config.store';
+import { formatMoney } from '../../utils/money';
 import { Theme } from '../../constants/theme';
 import { Share } from 'react-native';
 
@@ -20,6 +22,8 @@ interface ProfileStats {
 
 export default function CustomerProfileScreen() {
   const { user, logout } = useAuthStore();
+  const support = useSupportContacts();
+  const links = useAppLinks();
   const [stats, setStats] = useState<ProfileStats>({ totalOrders: 0, totalSpent: 0, pendingOrders: 0 });
   const [refreshing, setRefreshing] = useState(false);
 
@@ -30,8 +34,10 @@ export default function CustomerProfileScreen() {
       if (Array.isArray(orders)) {
         setStats({
           totalOrders: orders.length,
-          totalSpent: orders.reduce((s: number, o: any) => s + (o.total ?? 0), 0),
-          pendingOrders: orders.filter((o: any) => ['pending', 'processing'].includes(o.status?.toLowerCase())).length,
+          totalSpent: orders
+            .filter((o: any) => o.orderStatus !== 'cancelled')
+            .reduce((s: number, o: any) => s + (o.totalAmount ?? 0), 0),
+          pendingOrders: orders.filter((o: any) => ['pending', 'processing'].includes(o.orderStatus)).length,
         });
       }
     } catch { /* stats stay at defaults */ }
@@ -54,7 +60,7 @@ const menuSections = [
     items: [
       { icon: 'receipt-outline', label: 'My Orders', sub: `${stats.totalOrders} orders`, onPress: () => router.push('/(customer)/orders') },
       { icon: 'time-outline', label: 'Pending Orders', sub: `${stats.pendingOrders} awaiting action`, onPress: () => router.push({ pathname: '/(customer)/orders', params: { filter: 'pending' } }) },
-      { icon: 'heart-outline', label: 'Wishlist', sub: 'Saved items', onPress: () => router.push('/(customer)/wishlist') },
+      { icon: 'heart-outline', label: 'Favourites', sub: 'Saved items', onPress: () => router.push('/(customer)/favourites') },
       { icon: 'location-outline', label: 'Saved Addresses', sub: 'Manage delivery addresses', onPress: () => router.push('/(customer)/addresses') },
     ],
   },
@@ -64,13 +70,15 @@ const menuSections = [
       { icon: 'person-outline', label: 'Edit Profile', sub: 'Name, email, phone', onPress: () => router.push('/(customer)/edit-profile') },
       { icon: 'lock-closed-outline', label: 'Change Password', sub: 'Update your password', onPress: () => router.push('/(customer)/change-password') },
       { icon: 'notifications-outline', label: 'Notifications', sub: 'Manage alerts', onPress: () => router.push('/(customer)/notifications') },
+      { icon: 'trash-outline', label: 'Delete Account', sub: 'Permanently delete your account and data', onPress: () => router.push('/(customer)/delete-account') },
     ],
   },
   {
     title: 'Support',
     items: [
-      { icon: 'call-outline', label: 'Call Support', sub: '+91 9820623835', onPress: () => Linking.openURL('tel:+919820623835') },
-      { icon: 'chatbubble-outline', label: 'WhatsApp Us', sub: 'Chat with our team', onPress: () => Linking.openURL('whatsapp://send?phone=919820623835') },
+      { icon: 'call-outline', label: 'Call Support', sub: support.phone, onPress: () => Linking.openURL(telUrl(support.phone)) },
+      { icon: 'chatbubble-outline', label: 'WhatsApp Us', sub: 'Chat with our team', onPress: () => Linking.openURL(whatsappUrl(support.phone)) },
+      { icon: 'mail-outline', label: 'Email Support', sub: support.email, onPress: () => Linking.openURL(`mailto:${support.email}`) },
       { icon: 'document-text-outline', label: 'Terms & Privacy', sub: 'Legal information', onPress: () => router.push('/(customer)/terms') },
     ],
   },
@@ -119,15 +127,15 @@ const menuSections = [
           <View style={styles.statDivider} />
           <StatCard icon="time-outline" value={stats.pendingOrders} label="Pending" color={Theme.colors.warning} />
           <View style={styles.statDivider} />
-          <StatCard icon="cash-outline" value={`₹${stats.totalSpent.toFixed(0)}`} label="Spent" />
+          <StatCard icon="cash-outline" value={`${formatMoney(Math.round(stats.totalSpent))}`} label="Spent" />
         </View>
 
         {/* Quick Actions */}
         <View style={styles.quickActions}>
           <QuickAction icon="cart-outline" label="Cart" onPress={() => router.push('/(customer)/cart')} />
           <QuickAction icon="receipt-outline" label="Orders" onPress={() => router.push('/(customer)/orders')} />
-          <QuickAction icon="headset-outline" label="Support" onPress={() => Linking.openURL('tel:+919820623835')} />
-          <QuickAction icon="share-social-outline" label="Share App"  onPress={() => Share.share({ message: 'Check out LinkAndSmile app! Download now: https://yourstore.com' })} />
+          <QuickAction icon="headset-outline" label="Support" onPress={() => Linking.openURL(telUrl(support.phone))} />
+          <QuickAction icon="share-social-outline" label="Share App"  onPress={() => Share.share({ message: `Check out LinkAndSmile: ${links.website}` })} />
         </View>
 
         {/* Menu Sections */}
