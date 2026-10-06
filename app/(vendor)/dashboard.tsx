@@ -11,6 +11,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth.store';
 import { api } from '../../services/api';
 import { Theme } from '../../constants/theme';
+import { useSellingBlock } from '../../components/vendor/SellingGate';
+import { VendorStatusBanner } from '../../components/vendor/VendorStatusBanner';
 
 interface VendorStats {
   totalRevenue: number;
@@ -45,13 +47,16 @@ export default function VendorDashboard() {
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Orders are a selling feature: the server refuses them while the
+  // subscription is inactive or the shop is unapproved. Stats and wallet stay open.
+  const sellingLocked = useSellingBlock() !== null;
 
   const fetchStats = useCallback(async () => {
     try {
       const [statsRes, walletRes, ordersRes] = await Promise.allSettled([
         api.get('/api/vendor/stats'),
         api.get('/api/vendor/wallet'),
-        api.get('/api/vendor/orders?limit=5'), // ✅ fetch recent orders directly
+        sellingLocked ? { data: { orders: [] } } : api.get('/api/vendor/orders?limit=5'),
       ]);
 
       const statsData = statsRes.status === 'fulfilled' ? statsRes.value.data : {};
@@ -104,7 +109,7 @@ export default function VendorDashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [sellingLocked]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
 
@@ -184,6 +189,8 @@ export default function VendorDashboard() {
             )}
           </TouchableOpacity>
         </View>
+
+        <VendorStatusBanner />
 
         {/* Wallet Balance Hero */}
         <TouchableOpacity

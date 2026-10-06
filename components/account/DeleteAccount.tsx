@@ -28,7 +28,13 @@ interface Blocker {
   action?: { label: string; onPress: () => void };
 }
 
-export function DeleteAccount() {
+/**
+ * `onBack` is passed when this is shown from the vendor-agreement gate
+ * (components/vendor/MouAgreement.tsx) instead of as a route. The seller
+ * screens can't be opened from there, so refusals are explained without
+ * links to them.
+ */
+export function DeleteAccount({ onBack }: { onBack?: () => void } = {}) {
   const user = useAuthStore((s) => s.user);
   const signOutAfterAccountDeletion = useAuthStore((s) => s.signOutAfterAccountDeletion);
   const support = useSupportContacts();
@@ -43,7 +49,8 @@ export function DeleteAccount() {
 
   const canSubmit = confirmText.trim().toUpperCase() === CONFIRM_WORD && password.length > 0 && !deleting;
 
-  const go = (href: Href) => () => router.push(href);
+  const goBack = onBack ?? (() => router.back());
+  const linkTo = (label: string, href: Href) => (onBack ? undefined : { label, onPress: () => router.push(href) });
   const callSupport = { label: `Call support · ${support.phone}`, onPress: () => void Linking.openURL(telUrl(support.phone)) };
 
   /** Turns the server's refusal into something the user can act on. */
@@ -54,7 +61,7 @@ export function DeleteAccount() {
         return {
           title: count > 0 ? `${count} order${count === 1 ? ' is' : 's are'} still in progress` : 'Orders still in progress',
           message: error.message,
-          action: { label: 'View orders', onPress: go(isVendor ? '/(vendor)/orders' : '/(customer)/orders') },
+          action: linkTo('View orders', isVendor ? '/(vendor)/orders' : '/(customer)/orders'),
         };
       }
       case 'WALLET_FROZEN':
@@ -63,25 +70,25 @@ export function DeleteAccount() {
         return {
           title: 'Some sales have not cleared yet',
           message: error.message,
-          action: { label: 'Open wallet', onPress: go('/(vendor)/wallet') },
+          action: linkTo('Open wallet', '/(vendor)/wallet'),
         };
       case 'PAYOUT_IN_PROGRESS':
         return {
           title: 'A payout is being processed',
           message: error.message,
-          action: { label: 'Open wallet', onPress: go('/(vendor)/wallet') },
+          action: linkTo('Open wallet', '/(vendor)/wallet'),
         };
       case 'BANK_DETAILS_REQUIRED':
         return {
           title: 'Bank details needed',
           message: error.message,
-          action: { label: 'Add bank details', onPress: go('/(vendor)/bank-details') },
+          action: linkTo('Add bank details', '/(vendor)/bank-details'),
         };
       case 'WALLET_BALANCE': // older servers; newer ones settle the balance automatically
         return {
           title: 'Wallet balance remaining',
           message: error.message,
-          action: { label: 'Open wallet', onPress: go('/(vendor)/wallet') },
+          action: linkTo('Open wallet', '/(vendor)/wallet'),
         };
       case 'FORBIDDEN':
         return { title: "This account can't be deleted here", message: error.message, action: callSupport };
@@ -136,7 +143,7 @@ export function DeleteAccount() {
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} disabled={deleting}>
+        <TouchableOpacity onPress={goBack} style={styles.backBtn} disabled={deleting}>
           <Ionicons name="arrow-back" size={22} color={Theme.colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Delete Account</Text>
@@ -233,7 +240,7 @@ export function DeleteAccount() {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()} disabled={deleting}>
+          <TouchableOpacity style={styles.cancelBtn} onPress={goBack} disabled={deleting}>
             <Text style={styles.cancelBtnText}>Keep my account</Text>
           </TouchableOpacity>
         </ScrollView>

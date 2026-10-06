@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../services/api';
 import { Theme } from '../../constants/theme';
+import { withSellingGate } from '../../components/vendor/SellingGate';
 import { router } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
 
@@ -44,7 +45,7 @@ const STATUS_META: Record<string, { color: string; bg: string }> = {
   rejected: { color: Theme.colors.danger,  bg: Theme.colors.dangerSurface },
 };
 
-export default function VendorProductsScreen() {
+function VendorProductsScreen() {
   const [products, setProducts] = useState<VendorProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -524,3 +525,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+
+// Orders and products are selling features: locked, as on the server, while
+// the subscription is not active or the shop is not approved.
+export default withSellingGate(VendorProductsScreen, 'Products');

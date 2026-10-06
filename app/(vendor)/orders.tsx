@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../services/api';
 import { Theme } from '../../constants/theme';
+import { withSellingGate } from '../../components/vendor/SellingGate';
 
 interface VendorOrder {
   _id: string;
@@ -53,7 +54,7 @@ const NEXT_STATUS: Record<string, string> = {
   shipped: 'delivered',
 };
 
-export default function VendorOrdersScreen() {
+function VendorOrdersScreen() {
   const [orders, setOrders] = useState<VendorOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -752,3 +753,7 @@ const styles = StyleSheet.create({
   },
   cancelOrderText: { color: Theme.colors.danger, fontSize: Theme.font.md, fontWeight: '600' },
 });
+
+// Orders and products are selling features: locked, as on the server, while
+// the subscription is not active or the shop is not approved.
+export default withSellingGate(VendorOrdersScreen, 'Orders');

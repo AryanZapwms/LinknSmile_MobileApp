@@ -8,6 +8,7 @@ import { registerForPushNotifications } from '../services/notification.service';
 import { isExpired, tokenStore } from '../services/token-store';
 import { useCartStore } from './cart.store';
 import { useFavouritesStore } from './favourites.store';
+import { useVendorStatusStore } from './vendor-status.store';
 
 /** Server roles: "user" (customer), "shop_owner" (vendor), "admin". */
 export type UserRole = AuthUserDto['role'];
@@ -47,6 +48,7 @@ function resetUserData() {
   setMonitoringUser(null);
   useCartStore.getState().resetLocal();
   useFavouritesStore.getState().reset();
+  useVendorStatusStore.getState().reset();
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({

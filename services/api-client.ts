@@ -24,6 +24,7 @@ import type { ErrorCode } from '../contracts';
 import { ApiError, toApiError } from './api-error';
 import { API_BASE_URL } from './config';
 import { tokenStore, type StoredSession } from './token-store';
+import { isVendorBlock, type VendorBlock } from './vendor-access';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json', Accept: 'application/json' };
 const TIMEOUT_MS = 20_000;
@@ -155,8 +156,28 @@ function shouldRefresh(error: AxiosError, config: RetriableConfig | undefined): 
   return code === undefined || code === 'UNAUTHORIZED';
 }
 
+// ── Seller gates ─────────────────────────────────────────────────────────────
+
+let vendorBlockListener: ((code: VendorBlock) => void) | null = null;
+
+/**
+ * Called when the server refuses a seller request with MOU_REQUIRED,
+ * SUBSCRIPTION_EXPIRED or SHOP_PENDING: what the app knows about the seller's
+ * status is out of date. Registered once by store/vendor-status.store.ts.
+ */
+export function setVendorBlockListener(listener: (code: VendorBlock) => void) {
+  vendorBlockListener = listener;
+}
+
+function reportVendorBlock(error: AxiosError) {
+  if (error.response?.status !== 403) return;
+  const code = (error.response.data as { code?: unknown } | undefined)?.code;
+  if (isVendorBlock(code)) vendorBlockListener?.(code);
+}
+
 http.interceptors.response.use(undefined, async (error: AxiosError) => {
   const config = error.config as RetriableConfig | undefined;
+  reportVendorBlock(error);
   if (!shouldRefresh(error, config)) throw error;
 
   config._retried = true;
@@ -412,6 +433,23 @@ export const apiClient = {
         http.delete('/api/users/me', { data: body }),
         contracts.deleteAccountResponse,
         'Could not delete the account. Please try again or contact support.'
+      ),
+  },
+
+  // These three are never blocked by the seller gates: they are how a blocked
+  // seller finds out why, and gets unblocked.
+  vendor: {
+    /** What is open to this seller; see services/vendor-access.ts. */
+    status: () =>
+      unwrapAs(http.get('/api/vendor/status'), contracts.vendorStatusResponse, 'Could not load your seller account.'),
+    /** The current vendor agreement (markdown) and whether this seller accepted it. */
+    mou: () => unwrapAs(http.get('/api/vendor/mou'), contracts.vendorMouResponse, 'Could not load the agreement.'),
+    /** Records acceptance of the current agreement version. Safe to repeat. */
+    acceptMou: () =>
+      unwrapAs(
+        http.post('/api/vendor/mou'),
+        contracts.vendorMouAcceptResponse,
+        'Could not record your acceptance. Please try again.'
       ),
   },
 };

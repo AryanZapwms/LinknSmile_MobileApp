@@ -69,6 +69,12 @@ const fetchStats = useCallback(async () => {
       title: 'Store',
       items: [
         {
+          icon: 'shield-checkmark-outline',
+          label: 'Account Status',
+          sub: 'Approval, agreement, subscription',
+          onPress: () => router.push('/(vendor)/status'),
+        },
+        {
           icon: 'cube-outline',
           label: 'My Products',
           sub: `${stats.totalProducts} listed`,
