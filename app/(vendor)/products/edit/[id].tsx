@@ -181,7 +181,6 @@ const handleUpdate = async () => {
         stock: parseInt(stock, 10),
         category: category,
         images,
-        company: user?.shopId, // Use the shop ID from auth store
       };
       const res = await api.put(`/api/vendor/products/${id}`, payload);
       if (res.status === 200) {

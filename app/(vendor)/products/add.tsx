@@ -186,7 +186,6 @@ const uploadImage = async (uri: string) => {
       stock: parseInt(stock, 10),
       category: category,
       images,
-      company: user?.shopId, // Assuming user has shopId from auth store
     };
       const res = await api.post('/api/vendor/products', payload);
       if (res.status === 200 || res.status === 201) {

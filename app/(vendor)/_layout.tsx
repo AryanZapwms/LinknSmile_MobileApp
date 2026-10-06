@@ -11,7 +11,6 @@ import { useAuthStore } from '../../store/auth.store';
 import { Theme } from '../../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
-import { registerForPushNotificationsAsync } from '../../services/notification.service';
 
 const TABS = [
   { name: 'dashboard',  title: 'Dashboard', icon: 'grid-outline' },
@@ -29,6 +28,7 @@ const HIDDEN_SCREENS = [
   'change-password',
   'notifications',
   'seller-guidelines',
+  'delete-account',
 ];
 
 const TAB_WIDTH = 80;
@@ -94,8 +94,6 @@ function CustomTabBar({ state, navigation }: any) {
 
 export default function VendorLayout() {
   const { user, sessionRestored } = useAuthStore();
-  const notificationListener = useRef<Notifications.Subscription>();
-  const responseListener = useRef<Notifications.Subscription>();
 
   useEffect(() => {
     if (sessionRestored && user && user.role !== 'shop_owner') {
@@ -103,26 +101,14 @@ export default function VendorLayout() {
     }
   }, [sessionRestored, user]);
 
+  // Tapping a notification opens the orders tab (order details open from the
+  // list there). Registering the device for push happens after sign-in, in
+  // store/auth.store.ts.
   useEffect(() => {
-    // Listen for incoming notifications while app is foreground
-    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
-      console.log('Notification received:', notification);
+    const subscription = Notifications.addNotificationResponseReceivedListener(() => {
+      router.push('/(vendor)/orders');
     });
-
-    // Listen for user tapping on notification
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data;
-      if (data?.orderId) {
-        router.push(`/(vendor)/orders/${data.orderId}`);
-      } else {
-        router.push('/(vendor)/orders');
-      }
-    });
-
-    return () => {
-  notificationListener.current?.remove();
-  responseListener.current?.remove();
-};
+    return () => subscription.remove();
   }, []);
 
   if (!sessionRestored) {

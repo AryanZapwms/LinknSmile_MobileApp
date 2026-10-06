@@ -50,7 +50,8 @@ export default function EditProfileScreen() {
     }
     setLoading(true);
     try {
-      const payload: any = { name, email, phone };
+      // The profile endpoint does not change the email (docs/mobile-api.md).
+      const payload: { name: string; phone: string; imageBase64?: string } = { name, phone };
       if (image && image !== user?.image && image.startsWith('data:image')) {
         payload.imageBase64 = image;
       }
@@ -61,7 +62,6 @@ export default function EditProfileScreen() {
       Alert.alert('Success', 'Profile updated successfully');
       router.back();
     } catch (error: any) {
-      console.error('Profile update error:', error);
       Alert.alert('Error', error.response?.data?.error || 'Failed to update profile');
     } finally {
       setLoading(false);
