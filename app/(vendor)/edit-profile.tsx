@@ -9,7 +9,6 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/auth.store';
 import { api } from '../../services/api';
-import { storage } from '../../utils/storage';
 import { Theme } from '../../constants/theme';
 
 interface UserProfile {
@@ -74,19 +73,12 @@ export default function EditProfileScreen() {
     if (!validate()) return;
     setSaving(true);
     try {
-      await api.put('/api/users/profile', profile);
+      // The profile endpoint does not change the email (see docs/mobile-api.md).
+      const { email: _email, ...changes } = profile;
+      await api.put('/api/users/profile', changes);
 
-      // Update the stored user session so auth store reflects new name
-      const sessionStr = await storage.getUserSession();
-      if (sessionStr) {
-        const parsed = JSON.parse(sessionStr);
-        parsed.name = profile.name;
-        await storage.setUserSession(JSON.stringify(parsed));
-        // Patch zustand state directly without adding updateUser to store
-        useAuthStore.setState((s) => ({
-          user: s.user ? { ...s.user, name: profile.name } : s.user,
-        }));
-      }
+      // Keep the signed-in user (and the stored session) in step with the new name.
+      useAuthStore.getState().setUser({ name: profile.name, phone: profile.phone });
 
       Alert.alert('Saved!', 'Profile updated successfully.', [
         { text: 'OK', onPress: () => router.back() },

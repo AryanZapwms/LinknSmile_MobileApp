@@ -5,13 +5,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../services/api';
+import type { AddressDto } from '../../contracts';
+import { apiClient } from '../../services/api-client';
+import { errorMessage } from '../../services/api-error';
+import { addressFormSchema, fieldErrors } from '../../services/form-schemas';
 import { Theme } from '../../constants/theme';
 import { ScrollView } from 'react-native';
 import { router } from 'expo-router';
 
-interface Address {
-  _id: string;
+type Address = AddressDto;
+
+interface AddressForm {
   label: 'Home' | 'Work' | 'Other';
   name: string;
   phone: string;
@@ -21,8 +25,6 @@ interface Address {
   pincode: string;
   isDefault: boolean;
 }
-
-type AddressForm = Omit<Address, '_id'> & { _id?: string };
 
 export default function AddressesScreen() {
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -45,10 +47,9 @@ export default function AddressesScreen() {
 
   const fetchAddresses = async () => {
     try {
-      const res = await api.get('/api/addresses');
-      setAddresses(res.data);
+      setAddresses(await apiClient.addresses.list());
     } catch (error) {
-      console.error(error);
+      Alert.alert('Error', errorMessage(error, 'Could not load your addresses.'));
     } finally {
       setLoading(false);
     }
@@ -57,22 +58,25 @@ export default function AddressesScreen() {
   useEffect(() => { fetchAddresses(); }, []);
 
   const handleSave = async () => {
-    if (!form.name || !form.phone || !form.street || !form.city || !form.state || !form.pincode) {
-      Alert.alert('Error', 'Please fill all fields');
+    if (saving) return;
+    const parsed = addressFormSchema.safeParse(form);
+    if (!parsed.success) {
+      Alert.alert('Check the address', Object.values(fieldErrors(parsed.error))[0] ?? 'Please fill all fields');
       return;
     }
-    if (saving) return;
+    // Only address fields are sent, never ids or timestamps.
+    const body = { ...parsed.data, label: form.label, isDefault: form.isDefault };
     setSaving(true);
     try {
       if (editingId) {
-        await api.put(`/api/addresses/${editingId}`, form);
+        await apiClient.addresses.update(editingId, body);
       } else {
-        await api.post('/api/addresses', form);
+        await apiClient.addresses.create(body);
       }
       await fetchAddresses();
       closeModal();
     } catch (error) {
-      Alert.alert('Error', 'Failed to save address');
+      Alert.alert('Error', errorMessage(error, 'Failed to save address'));
     } finally {
       setSaving(false);
     }
@@ -88,10 +92,10 @@ export default function AddressesScreen() {
         onPress: async () => {
           setDeletingId(id);
           try {
-            await api.delete(`/api/addresses/${id}`);
+            await apiClient.addresses.remove(id);
             await fetchAddresses();
           } catch (error) {
-            Alert.alert('Error', 'Failed to delete address');
+            Alert.alert('Error', errorMessage(error, 'Failed to delete address'));
           } finally {
             setDeletingId(null);
           }
@@ -102,17 +106,27 @@ export default function AddressesScreen() {
 
   const setDefault = async (id: string) => {
     try {
-      await api.patch(`/api/addresses/${id}/default`);
+      // PATCH /api/addresses/:id marks it as the default and unsets the others.
+      await apiClient.addresses.setDefault(id);
       await fetchAddresses();
     } catch (error) {
-      Alert.alert('Error', 'Failed to set default');
+      Alert.alert('Error', errorMessage(error, 'Failed to set default'));
     }
   };
 
   const openModal = (address?: Address) => {
     if (address) {
       setEditingId(address._id);
-      setForm({ ...address });
+      setForm({
+        label: address.label,
+        name: address.name,
+        phone: address.phone,
+        street: address.street,
+        city: address.city,
+        state: address.state,
+        pincode: address.pincode,
+        isDefault: address.isDefault,
+      });
     } else {
       setEditingId(null);
       setForm({

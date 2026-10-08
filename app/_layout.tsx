@@ -1,71 +1,66 @@
 // app/_layout.tsx
-import { Stack, useSegments } from 'expo-router';
-import { View, ActivityIndicator } from 'react-native';
-import { useAuthStore } from '../store/auth.store';
+import { router, Stack, useSegments } from 'expo-router';
 import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
 import { ErrorBoundary } from '../components/ui/ErrorBoundary';
+import { UpdateRequired } from '../components/ui/UpdateRequired';
+import { initMonitoring, withMonitoring } from '../services/monitoring';
+import { useAppConfigStore } from '../store/app-config.store';
+import { useAuthStore } from '../store/auth.store';
 
-export default function RootLayout() {
+// Crash reporting starts before anything renders (no-op without a Sentry DSN).
+initMonitoring();
+
+function RootLayout() {
   const user = useAuthStore((state) => state.user);
-  const isLoading = useAuthStore((state) => state.isLoading);
   const sessionRestored = useAuthStore((state) => state.sessionRestored);
   const restoreSession = useAuthStore((state) => state.restoreSession);
-  const segments = useSegments();
+  const loadAppConfig = useAppConfigStore((state) => state.load);
+  const updateRequired = useAppConfigStore((state) => state.updateRequired);
+  const segments = useSegments() as string[];
 
-  console.log('[Layout] Rendering RootLayout');
-  console.log('[Layout] Current segments:', segments);
-  console.log('[Layout] Session restored:', sessionRestored);
-  console.log('[Layout] User:', user);
-
-  // Restore session once on mount
+  // Once, at app start: read the stored session and fetch the startup config.
   useEffect(() => {
-    console.log('[Layout] useEffect: restoring session...');
-    if (!sessionRestored) {
-      restoreSession();
+    void restoreSession();
+    void loadAppConfig();
+  }, [restoreSession, loadAppConfig]);
+
+  // Send people to the right area: signed-out users to login, signed-in users
+  // out of the auth screens. This also runs when the session ends (user → null).
+  useEffect(() => {
+    if (!sessionRestored) return;
+
+    const inAuthGroup = segments[0] === 'auth';
+    const isIndexRoute = segments.length === 0;
+
+    if (!user && !inAuthGroup) {
+      router.replace('/auth/login');
+      return;
     }
-  }, []);
 
-// Handle role-based redirects
-useEffect(() => {
-  if (!sessionRestored) return;
+    if (user && (isIndexRoute || inAuthGroup)) {
+      // Vendors get the seller area; everyone else (customers, admins) the shop.
+      router.replace(user.role === 'shop_owner' ? '/(vendor)/dashboard' : '/(customer)/home');
+    }
+  }, [user, sessionRestored, segments]);
 
-  const inAuthGroup = segments[0] === 'auth';
-  const isIndexRoute = segments.length === 0;
-
-  // If no user and trying to access non-auth route, go to login
-  if (!user && !inAuthGroup) {
-    router.replace('/auth/login');
-    return;
+  if (updateRequired) {
+    return (
+      <SafeAreaProvider>
+        <UpdateRequired />
+      </SafeAreaProvider>
+    );
   }
 
-  // If user exists, only redirect from auth or index routes
-  if (user && (isIndexRoute || inAuthGroup)) {
-    // Determine target route based on role
-    let targetRoute: string;
-    if (user.role === 'shop_owner') {
-      targetRoute = '/(vendor)/dashboard';
-    } else {
-      // Treat 'user', 'customer', or any other role as customer
-      targetRoute = '/(customer)/home';
-    }
-    console.log(`[Layout] Redirecting from ${segments.join('/')} to ${targetRoute}`);
-    router.replace(targetRoute);
-  }
-}, [user, sessionRestored, segments]);
-
-  // Show loading spinner until session restored
   if (!sessionRestored) {
-    console.log('[Layout] Showing loading spinner...');
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color="#6C5CE7" />
       </View>
     );
   }
 
-  console.log('[Layout] Rendering Stack');
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
@@ -74,3 +69,5 @@ useEffect(() => {
     </SafeAreaProvider>
   );
 }
+
+export default withMonitoring(RootLayout);

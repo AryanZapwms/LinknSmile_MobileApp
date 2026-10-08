@@ -10,6 +10,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, router } from 'expo-router';
 import { api } from '../../../../services/api';
 import { Theme } from '../../../../constants/theme';
+import { withSellingGate } from '../../../../components/vendor/SellingGate';
 
 interface Category {
   _id: string;
@@ -27,7 +28,7 @@ interface Product {
   category?: string;
 }
 
-export default function EditProductScreen() {
+function EditProductScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -181,7 +182,6 @@ const handleUpdate = async () => {
         stock: parseInt(stock, 10),
         category: category,
         images,
-        company: user?.shopId, // Use the shop ID from auth store
       };
       const res = await api.put(`/api/vendor/products/${id}`, payload);
       if (res.status === 200) {
@@ -432,3 +432,7 @@ const styles = StyleSheet.create({
   submitDisabled: { opacity: 0.6 },
   submitText: { fontSize: Theme.font.md, fontWeight: '700', color: Theme.colors.white },
 });
+
+// Orders and products are selling features: locked, as on the server, while
+// the subscription is not active or the shop is not approved.
+export default withSellingGate(EditProductScreen, 'Edit Product');

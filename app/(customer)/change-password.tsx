@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ActivityInd
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { api } from '../../services/api';
+import { apiClient } from '../../services/api-client';
+import { errorMessage } from '../../services/api-error';
 import { Theme } from '../../constants/theme';
 
 export default function ChangePasswordScreen() {
@@ -29,11 +30,12 @@ export default function ChangePasswordScreen() {
     }
     setLoading(true);
     try {
-      await api.post('/api/change-password', { currentPassword: current, newPassword });
+      // POST /api/auth/change-password
+      await apiClient.auth.changePassword({ currentPassword: current, newPassword });
       Alert.alert('Success', 'Password changed successfully');
       router.back();
-    } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.message || 'Failed to change password');
+    } catch (error) {
+      Alert.alert('Error', errorMessage(error, 'Failed to change password'));
     } finally {
       setLoading(false);
     }

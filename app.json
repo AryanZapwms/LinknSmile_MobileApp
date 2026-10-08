@@ -7,9 +7,17 @@
     "icon": "./assets/images/icon.png",
     "scheme": "lnsmobile",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": [
+          "tez",
+          "phonepe",
+          "paytmmp",
+          "credpay",
+          "bhim"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +26,6 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.aryangupta1520.LNSMobile"
     },

@@ -1,5 +1,5 @@
 // app/auth/login.tsx
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,13 +11,13 @@ import {
   TextInput,
   Animated,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { retryAfterText } from '../../services/api-error';
+import { useSupportContacts } from '../../store/app-config.store';
 import { useAuthStore } from '../../store/auth.store';
-import { useCartStore } from '../../store/cart.store';
 import { Theme } from '../../constants/theme';
 
 export default function LoginScreen() {
@@ -26,12 +26,21 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [formError, setFormError] = useState('');
+  // Seconds left before another attempt is allowed (server rate limit).
+  const [cooldown, setCooldown] = useState(0);
 
   const { login, isLoading } = useAuthStore();
-  const { loadCart } = useCartStore();
+  const support = useSupportContacts();
   const passwordRef = useRef<TextInput>(null);
 
-  const shakeAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((seconds) => seconds - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  const [shakeAnim] = useState(() => new Animated.Value(0));
 
   const shake = () => {
     Animated.sequence([
@@ -56,24 +65,44 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
+    if (isLoading || cooldown > 0) return;
+
     const eErr = validateEmail(email);
     const pErr = validatePassword(password);
     setEmailError(eErr);
     setPasswordError(pErr);
+    setFormError('');
 
     if (eErr || pErr) {
       shake();
       return;
     }
 
-    const success = await login(email.trim().toLowerCase(), password);
+    const normalizedEmail = email.trim().toLowerCase();
+    // One attempt per tap: login is rate-limited on the server and is never
+    // retried automatically.
+    const result = await login(normalizedEmail, password);
+    if (result.ok) return; // app/_layout.tsx redirects by role
 
-    if (success) {
-      await loadCart();
-      // _layout.tsx handles redirect based on user.role
-    } else {
-      shake();
+    const { error } = result;
+    switch (error.code) {
+      case 'EMAIL_NOT_VERIFIED':
+        // The account exists but the email was never confirmed: finish that first.
+        router.push({ pathname: '/auth/otp', params: { email: normalizedEmail, flow: 'register' } });
+        return;
+      case 'RATE_LIMITED':
+        setCooldown(error.retryAfterSeconds ?? 60);
+        setFormError(`Too many login attempts. ${retryAfterText(error.retryAfterSeconds ?? 60)}`);
+        break;
+      case 'ACCOUNT_DISABLED':
+        setFormError(`${error.message} Contact support: ${support.email} · ${support.phone}`);
+        break;
+      default:
+        // INVALID_CREDENTIALS, OAUTH_ACCOUNT, network errors…: the server's
+        // message already says what to do.
+        setFormError(error.message);
     }
+    shake();
   };
 
   return (
@@ -167,17 +196,24 @@ export default function LoginScreen() {
               {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
             </View>
 
+            {formError ? (
+              <View style={styles.formErrorBox}>
+                <Ionicons name="alert-circle-outline" size={16} color={Theme.colors.danger} />
+                <Text style={styles.formErrorText}>{formError}</Text>
+              </View>
+            ) : null}
+
             {/* Submit */}
             <TouchableOpacity
-              style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
+              style={[styles.submitButton, (isLoading || cooldown > 0) && styles.submitButtonDisabled]}
               onPress={handleLogin}
-              disabled={isLoading}
+              disabled={isLoading || cooldown > 0}
               activeOpacity={0.85}
             >
               {isLoading ? (
                 <ActivityIndicator color={Theme.colors.white} size="small" />
               ) : (
-                <Text style={styles.submitText}>Sign In</Text>
+                <Text style={styles.submitText}>{cooldown > 0 ? `Try again in ${cooldown}s` : 'Sign In'}</Text>
               )}
             </TouchableOpacity>
 
@@ -247,6 +283,12 @@ const styles = StyleSheet.create({
   },
   eyeButton: { padding: Theme.spacing.xs },
   errorText: { fontSize: 12, color: Theme.colors.danger, marginTop: 4, marginLeft: 2 },
+  formErrorBox: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+    backgroundColor: Theme.colors.dangerSurface, borderRadius: Theme.radius.md,
+    padding: Theme.spacing.md, marginBottom: Theme.spacing.sm,
+  },
+  formErrorText: { flex: 1, fontSize: Theme.font.sm, color: Theme.colors.danger, lineHeight: 18 },
 
   submitButton: {
     backgroundColor: Theme.colors.primary,

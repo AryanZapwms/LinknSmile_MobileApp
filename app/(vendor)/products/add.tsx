@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { api } from '../../../services/api';
 import { Theme } from '../../../constants/theme';
+import { withSellingGate } from '../../../components/vendor/SellingGate';
 import { router } from 'expo-router';
 import * as FileSystem from 'expo-file-system';
 import { useAuthStore } from '../../../store/auth.store';
@@ -20,7 +21,7 @@ interface Category {
   name: string;
 }
 
-export default function AddProductScreen() {
+function AddProductScreen() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
@@ -186,7 +187,6 @@ const uploadImage = async (uri: string) => {
       stock: parseInt(stock, 10),
       category: category,
       images,
-      company: user?.shopId, // Assuming user has shopId from auth store
     };
       const res = await api.post('/api/vendor/products', payload);
       if (res.status === 200 || res.status === 201) {
@@ -434,3 +434,7 @@ const styles = StyleSheet.create({
   submitDisabled: { opacity: 0.6 },
   submitText: { fontSize: Theme.font.md, fontWeight: '700', color: Theme.colors.white },
 });
+
+// Orders and products are selling features: locked, as on the server, while
+// the subscription is not active or the shop is not approved.
+export default withSellingGate(AddProductScreen, 'Add Product');

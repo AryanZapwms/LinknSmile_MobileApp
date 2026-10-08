@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useProductStore } from '../../store/product.store';
 import { useAuthStore } from '../../store/auth.store';
 import { useCartStore } from '../../store/cart.store';
-import { useWishlistStore } from '../../store/wishlist.store'; // import wishlist store
+import { useFavouritesStore } from '../../store/favourites.store';
 import { Theme } from '../../constants/theme';
 
 const { width } = Dimensions.get('window');
@@ -29,8 +29,8 @@ export default function CustomerHomeScreen() {
   const { products, featuredProducts, categories, isCategoriesLoading, fetchProducts, fetchFeaturedProducts, fetchCategories } = useProductStore();
   const { user } = useAuthStore();
   const totalItems = useCartStore((s) => s.items.reduce((sum, i) => sum + i.quantity, 0));
-  const wishlistItems = useWishlistStore((s) => s.items); // get wishlist items
-  const fetchWishlist = useWishlistStore((s) => s.fetchWishlist);
+  const favouriteCount = useFavouritesStore((s) => s.productIds.length);
+  const loadFavourites = useFavouritesStore((s) => s.load);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -39,7 +39,7 @@ export default function CustomerHomeScreen() {
       fetchProducts({ limit: 20 }),
       fetchFeaturedProducts(),
       fetchCategories(),
-      fetchWishlist(), // fetch wishlist count
+      loadFavourites().catch(() => {}), // for the heart badge
     ]);
   }, []);
 
@@ -74,15 +74,15 @@ export default function CustomerHomeScreen() {
           <Text style={styles.subGreeting}>What are you looking for?</Text>
         </View>
         <View style={styles.headerActions}>
-          {/* Wishlist Button */}
+          {/* Favourites */}
           <TouchableOpacity
             style={styles.iconBtn}
-            onPress={() => router.push('/(customer)/wishlist')}
+            onPress={() => router.push('/(customer)/favourites')}
           >
             <Ionicons name="heart-outline" size={24} color={Theme.colors.text} />
-            {wishlistItems.length > 0 && (
+            {favouriteCount > 0 && (
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>{wishlistItems.length > 9 ? '9+' : wishlistItems.length}</Text>
+                <Text style={styles.badgeText}>{favouriteCount > 9 ? '9+' : favouriteCount}</Text>
               </View>
             )}
           </TouchableOpacity>

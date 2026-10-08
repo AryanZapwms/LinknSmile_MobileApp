@@ -10,7 +10,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Theme } from '../../../constants/theme';
 
 export default function OrderSuccessScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `orderNumber` (e.g. ORD-1712345678901-42) is passed by checkout for cash
+  // on delivery; online payments only return the order id.
+  const { id, orderNumber } = useLocalSearchParams<{ id: string; orderNumber?: string }>();
 
   const scaleAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -39,9 +41,7 @@ export default function OrderSuccessScreen() {
     ]).start();
   }, []);
 
-  const shortId = id && id !== 'success'
-    ? `#${id.slice(-8).toUpperCase()}`
-    : null;
+  const shortId = orderNumber || (id ? `#${id.slice(-8).toUpperCase()}` : null);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -65,7 +65,7 @@ export default function OrderSuccessScreen() {
           </Text>
           {shortId && (
             <View style={styles.orderIdBox}>
-              <Text style={styles.orderIdLabel}>Order ID</Text>
+              <Text style={styles.orderIdLabel}>Order number</Text>
               <Text style={styles.orderId}>{shortId}</Text>
             </View>
           )}

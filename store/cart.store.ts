@@ -1,27 +1,45 @@
 // store/cart.store.ts
-import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api } from '../services/api';
-import { storage } from '../utils/storage';
+import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
+import { apiClient } from '../services/api-client';
+import { tokenStore } from '../services/token-store';
 
 export interface CartItem {
   productId: string;
   name: string;
+  slug?: string;
+  /** Unit price before discount (the size's price when a size is selected). */
   price: number;
-  discountPrice?: number;
+  /** Discounted unit price, if any. */
+  discountPrice?: number | null;
   quantity: number;
   image: string;
   stock: number;
   shopId?: string;
   shopName?: string;
-  vendorId?: string;
-  vendorName?: string;
+  /**
+   * The chosen size variant. `size` + `quantity` identify it on the server
+   * (e.g. size "Small", quantity 50, unit "ml").
+   */
   selectedSize?: {
     size: string;
     quantity: number;
-    unit: string;
-  };
+    unit?: string;
+  } | null;
+}
+
+/** Most units the app lets a customer put in one cart; larger orders go through support. */
+export const MAX_CART_UNITS = 5;
+
+/** Identifies a cart line: the product plus its size variant, if any. */
+export function cartItemKey(item: Pick<CartItem, 'productId' | 'selectedSize'>): string {
+  return `${item.productId}|${item.selectedSize?.size ?? ''}|${item.selectedSize?.quantity ?? ''}`;
+}
+
+/** What one unit of this line costs. */
+export function unitPrice(item: Pick<CartItem, 'price' | 'discountPrice'>): number {
+  return item.discountPrice || item.price;
 }
 
 interface CartState {
@@ -30,15 +48,27 @@ interface CartState {
   error: string | null;
   _hasHydrated: boolean;
   setHasHydrated: (state: boolean) => void;
+  /** Adds a line, or increases its quantity if the same product + size is already there. */
   addItem: (item: CartItem) => void;
-  removeItem: (productId: string, sizeKey?: string) => void;
-  updateQuantity: (productId: string, quantity: number, sizeKey?: string) => void;
+  removeItem: (key: string) => void;
+  /** Removes several lines at once (e.g. the ones that were just ordered). */
+  removeItems: (keys: string[]) => void;
+  updateQuantity: (key: string, quantity: number) => void;
   getTotalItems: () => number;
   getTotalPrice: () => number;
+  /** Empties the cart here and on the server. */
   clearCart: () => void;
+  /** Empties the cart in memory only (sign-out); the server copy is untouched. */
+  resetLocal: () => void;
   syncCart: () => Promise<void>;
   loadCart: () => Promise<void>;
 }
+
+// Server syncs replace the whole cart, so they must not overlap or arrive out
+// of order: run one at a time and, if changes came in meanwhile, send the
+// latest state once more.
+let syncing = false;
+let syncAgain = false;
 
 export const useCartStore = create<CartState>()(
   persist(
@@ -47,231 +77,144 @@ export const useCartStore = create<CartState>()(
       isLoading: false,
       error: null,
 
-      // ✅ Hydration state — prevents addItem from firing before AsyncStorage loads
+      // Set once AsyncStorage has been read, so nothing writes before that.
       _hasHydrated: false,
-      setHasHydrated: (hasHydrated: boolean) => {
-        console.log('💧 Cart store hydration state:', hasHydrated);
-        set({ _hasHydrated: hasHydrated });
-      },
+      setHasHydrated: (hasHydrated) => set({ _hasHydrated: hasHydrated }),
 
-      addItem: (item: CartItem) => {
-        console.log('🛒 addItem called with:', item);
-
+      addItem: (item) => {
         const { items } = get();
-        const currentTotalItems = get().getTotalItems();
+        if (get().getTotalItems() >= MAX_CART_UNITS) return;
 
-        console.log('📊 Current cart state:', {
-          existingItems: items.length,
-          currentTotalItems,
-          items: items.map(i => ({ name: i.name, quantity: i.quantity })),
-        });
-
-        if (currentTotalItems >= 5) {
-          console.log('⚠️ Bulk order limit reached (5 items max)');
-          return;
-        }
-
-        const sizeKey = item.selectedSize
-          ? `${item.selectedSize.size}-${item.selectedSize.quantity}`
-          : undefined;
-
-        const existingItemIndex = items.findIndex(
-          (i) =>
-            i.productId === item.productId &&
-            (sizeKey
-              ? i.selectedSize?.size === item.selectedSize?.size
-              : !i.selectedSize)
-        );
-
-        console.log('🔍 Existing item check:', { existingItemIndex, sizeKey });
-
-        let updatedItems: CartItem[];
-
-        if (existingItemIndex !== -1) {
-          console.log('📦 Updating existing item quantity');
-          updatedItems = [...items];
-          const newQuantity = Math.min(
-            updatedItems[existingItemIndex].quantity + item.quantity,
-            updatedItems[existingItemIndex].stock
-          );
-          updatedItems[existingItemIndex] = {
-            ...updatedItems[existingItemIndex],
-            quantity: newQuantity,
-          };
-          console.log('✅ Item updated, new quantity:', newQuantity);
-        } else {
-          console.log('🆕 Adding new item to cart');
-          updatedItems = [...items, item];
-          console.log('✅ New item added');
-        }
-
-        set({ items: updatedItems });
-
-        console.log('📦 Cart after update:', {
-          totalItems: updatedItems.length,
-          items: updatedItems.map(i => ({ name: i.name, quantity: i.quantity })),
-        });
-
-        get().syncCart();
-      },
-
-      removeItem: (productId: string, sizeKey?: string) => {
-        console.log('🗑️ removeItem called:', { productId, sizeKey });
-
-        const { items } = get();
-        const updatedItems = items.filter(
-          (item) =>
-            !(
-              item.productId === productId &&
-              (sizeKey
-                ? item.selectedSize?.size === sizeKey
-                : !item.selectedSize)
+        const key = cartItemKey(item);
+        const existing = items.find((i) => cartItemKey(i) === key);
+        const updated = existing
+          ? items.map((i) =>
+              i === existing ? { ...i, quantity: Math.min(i.quantity + item.quantity, i.stock) } : i
             )
-        );
-        set({ items: updatedItems });
-        console.log('✅ Item removed, remaining:', updatedItems.length);
+          : [...items, item];
 
-        get().syncCart();
+        set({ items: updated });
+        void get().syncCart();
       },
 
-      updateQuantity: (productId: string, quantity: number, sizeKey?: string) => {
-        console.log('🔄 updateQuantity called:', { productId, quantity, sizeKey });
+      removeItem: (key) => get().removeItems([key]),
 
-        const { items } = get();
-        const updatedItems = items.map((item) => {
-          if (
-            item.productId === productId &&
-            (sizeKey
-              ? item.selectedSize?.size === sizeKey
-              : !item.selectedSize)
-          ) {
-            const newQuantity = Math.min(Math.max(1, quantity), item.stock);
-            console.log(
-              `📦 Updating quantity for ${item.name}: ${item.quantity} -> ${newQuantity}`
-            );
-            return { ...item, quantity: newQuantity };
-          }
-          return item;
+      removeItems: (keys) => {
+        const remove = new Set(keys);
+        set({ items: get().items.filter((item) => !remove.has(cartItemKey(item))) });
+        void get().syncCart();
+      },
+
+      updateQuantity: (key, quantity) => {
+        set({
+          items: get().items.map((item) =>
+            cartItemKey(item) === key
+              ? { ...item, quantity: Math.min(Math.max(1, quantity), item.stock) }
+              : item
+          ),
         });
-        set({ items: updatedItems });
-
-        get().syncCart();
+        void get().syncCart();
       },
 
-      getTotalItems: () => {
-        const { items } = get();
-        const total = items.reduce((sum, item) => sum + item.quantity, 0);
-        console.log('📊 getTotalItems:', total);
-        return total;
-      },
+      getTotalItems: () => get().items.reduce((sum, item) => sum + item.quantity, 0),
 
-      getTotalPrice: () => {
-        const { items } = get();
-        const total = items.reduce((sum, item) => {
-          const price = item.discountPrice || item.price;
-          return sum + price * item.quantity;
-        }, 0);
-        console.log('💰 getTotalPrice:', total);
-        return total;
-      },
+      getTotalPrice: () => get().items.reduce((sum, item) => sum + unitPrice(item) * item.quantity, 0),
 
       clearCart: () => {
-        console.log('🧹 clearCart called');
         set({ items: [] });
-        get().syncCart();
+        void get().syncCart();
       },
 
+      resetLocal: () => set({ items: [], error: null, isLoading: false }),
+
       syncCart: async () => {
-        const { items } = get();
-        console.log('🔄 syncCart called, items count:', items.length);
-
-        const token = await storage.getToken();
-        console.log('🔑 Token exists:', !!token);
-
-        if (!token) {
-          console.log('⚠️ No token found, skipping server sync');
+        if (!(await tokenStore.load())) return; // not signed in: the cart stays local
+        if (syncing) {
+          syncAgain = true;
           return;
         }
-
-        set({ isLoading: true, error: null });
-
+        syncing = true;
         try {
-          const cartData = {
-            items: items.map((item) => ({
-              productId: item.productId,
-              quantity: item.quantity,
-              selectedSize: item.selectedSize,
-            })),
-          };
-
-          console.log('📤 Sending cart to server:', cartData);
-          await api.post('/api/cart', cartData);
-          console.log('✅ Cart synced with server successfully');
-          set({ isLoading: false });
-        } catch (error: any) {
-          console.error('❌ Error syncing cart:', error.message);
-          // Don't clear cart on 401 — api.ts interceptor handles token cleanup
-          set({ error: error.message, isLoading: false });
+          do {
+            syncAgain = false;
+            await apiClient.cart.replace({
+              items: get().items.map((item) => ({
+                productId: item.productId,
+                name: item.name,
+                slug: item.slug ?? item.productId,
+                image: item.image,
+                quantity: item.quantity,
+                selectedSize: item.selectedSize
+                  ? { size: item.selectedSize.size, quantity: item.selectedSize.quantity }
+                  : undefined,
+              })),
+            });
+          } while (syncAgain);
+          set({ error: null });
+        } catch (error) {
+          // The local cart is the one the user sees; a failed sync is retried
+          // on the next change.
+          set({ error: error instanceof Error ? error.message : 'Cart sync failed' });
+        } finally {
+          syncing = false;
         }
       },
 
       loadCart: async () => {
-        console.log('📥 loadCart called');
-
-        const token = await storage.getToken();
-        console.log('🔑 Token exists:', !!token);
-
-        if (!token) {
-          console.log('⚠️ No token found, skipping load from server');
-          return;
-        }
-
+        if (!(await tokenStore.load())) return;
         set({ isLoading: true, error: null });
-
         try {
-          const response = await api.get('/api/cart');
-          console.log('📦 Server cart response:', response.data);
+          const response = await apiClient.cart.get();
+          const serverItems = (response.items ?? []) as Record<string, any>[];
 
-          const serverItems = response.data.items || [];
-
+          // An empty server cart never wipes the local one.
           if (serverItems.length > 0) {
-            const mappedItems: CartItem[] = serverItems.map((item: any) => ({
-              productId: item.productId,
-              name: item.name,
-              price: item.price,
-              discountPrice: item.discountPrice,
-              quantity: item.quantity,
-              image: item.image,
-              stock: item.stock,
-              shopId: item.shopId,
-              shopName: item.shopName,
-              vendorId: item.vendorId,
-              vendorName: item.vendorName,
-              selectedSize: item.selectedSize,
-            }));
-            console.log('✅ Loaded items from server:', mappedItems.length);
-            set({ items: mappedItems, isLoading: false });
-          } else {
-            console.log('📭 No items found on server, keeping local cart');
-            set({ isLoading: false });
+            const items: CartItem[] = serverItems
+              .filter((item) => item?.productId)
+              .map((item) => ({
+                productId: String(item.productId),
+                name: item.name ?? 'Product',
+                slug: item.slug,
+                price: Number(item.price) || 0,
+                discountPrice: item.discountPrice ?? null,
+                quantity: Number(item.quantity) || 1,
+                image: item.image ?? '',
+                stock: Number(item.stock) || 0,
+                shopId: item.shopId ? String(item.shopId) : undefined,
+                shopName: item.shopName,
+                selectedSize: item.selectedSize?.size
+                  ? {
+                      size: item.selectedSize.size,
+                      quantity: Number(item.selectedSize.quantity),
+                      unit: item.selectedSize.unit,
+                    }
+                  : null,
+              }));
+            set({ items });
           }
-        } catch (error: any) {
-          console.error('❌ Error loading cart from server:', error.message);
-          // ✅ Don't wipe local cart on any error — just stop loading
-          // Token cleanup on 401 is handled by the api.ts interceptor
-          set({ error: error.message, isLoading: false });
+          set({ isLoading: false });
+        } catch (error) {
+          set({ error: error instanceof Error ? error.message : 'Could not load the cart', isLoading: false });
         }
       },
     }),
     {
       name: 'cart-storage',
       storage: createJSONStorage(() => AsyncStorage),
-      // ✅ Notify store when AsyncStorage has finished rehydrating
+      // Only the items are worth keeping between launches.
+      partialize: (state) => ({ items: state.items }),
+      // v2: `selectedSize` is an object (or null). Earlier builds could store
+      // a bare string there, which the server cannot price.
+      version: 2,
+      migrate: (persisted) => {
+        const items = ((persisted as { items?: CartItem[] } | undefined)?.items ?? []).map((item) => ({
+          ...item,
+          selectedSize: item.selectedSize && typeof item.selectedSize === 'object' ? item.selectedSize : null,
+        }));
+        return { items };
+      },
       onRehydrateStorage: () => (state) => {
-        if (state) {
-          state.setHasHydrated(true);
-          console.log('✅ Cart store rehydrated from AsyncStorage');
-        }
+        state?.setHasHydrated(true);
       },
     }
   )

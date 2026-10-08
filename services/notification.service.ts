@@ -1,61 +1,68 @@
 // services/notification.service.ts
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
-import Constants from 'expo-constants';
-import { Platform, Alert } from 'react-native';
-import { api } from './api';
+// Push notifications: ask permission, get this device's Expo push token and
+// register it for the signed-in user (POST /api/users/push-token). The token
+// is remembered locally so logout can unregister it.
 
-// Configure how notifications are shown when app is in foreground
+import Constants from 'expo-constants';
+import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
+import { apiClient } from './api-client';
+import { tokenStore } from './token-store';
+
+// How notifications appear while the app is open.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
 });
 
-export async function registerForPushNotificationsAsync() {
-  if (!Device.isDevice) {
-    Alert.alert('Must use physical device for Push Notifications');
-    return;
-  }
+let tokenListener: Notifications.EventSubscription | null = null;
 
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-  if (finalStatus !== 'granted') {
-    Alert.alert('Failed to get push token for push notification!');
-    return;
-  }
+/**
+ * Registers this device for the signed-in user. Safe to call on every app
+ * start and after every login: it never throws and never shows an alert
+ * (simulators and denied permission simply mean "no push").
+ */
+export async function registerForPushNotifications(): Promise<void> {
+  if (Platform.OS === 'web' || !Device.isDevice) return;
 
-  // Get the Expo push token
-  const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-  if (!projectId) {
-    console.error('Project ID not found');
-    return;
-  }
-
-  const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
-  console.log('Expo Push Token:', token);
-
-  // Android: set up notification channel
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'default',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#FF231F7C',
-    });
-  }
-
-  // Send token to backend
   try {
-    await api.post('/api/vendor/register-push-token', { token });
-    console.log('Push token registered on server');
+    // Android 13+ only shows the permission prompt once a channel exists.
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'General',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+      });
+    }
+
+    let { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      ({ status } = await Notifications.requestPermissionsAsync());
+    }
+    if (status !== 'granted') return;
+
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    if (!projectId) return;
+
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    if (!(await tokenStore.load())) return; // signed out while we were asking
+
+    await apiClient.users.registerPushToken({
+      token,
+      platform: Platform.OS === 'ios' ? 'ios' : 'android',
+    });
+    await tokenStore.setPushToken(token);
+
+    // The OS can replace the device token at any time: register again then.
+    tokenListener ??= Notifications.addPushTokenListener(() => {
+      void registerForPushNotifications();
+    });
   } catch (error) {
-    console.error('Failed to register push token:', error);
+    if (__DEV__) console.warn('[push] registration failed:', error);
   }
 }
