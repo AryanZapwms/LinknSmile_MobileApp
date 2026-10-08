@@ -306,12 +306,14 @@ function Checkout() {
       ].filter((m): m is Exclude<typeof m, false> => Boolean(m)),
     [payments.cod, payments.razorpay, onlinePayment]
   );
-  // The method in use is the customer's choice while it is still offered,
-  // otherwise the first usable one (e.g. after the admin switches one off).
+  // Nothing is pre-selected: the customer has to tap a method before the
+  // order button works, so one tap can never place an order or start a
+  // payment they did not choose. A choice stops counting once that method is
+  // no longer offered (e.g. the admin switched it off); they then pick again.
   const [chosenMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
-  const usableMethods = methods.filter((m) => m.usable).map((m) => m.key);
+  const canChooseMethod = methods.some((m) => m.usable);
   const paymentMethod: PaymentMethod | null =
-    chosenMethod && usableMethods.includes(chosenMethod) ? chosenMethod : usableMethods[0] ?? null;
+    chosenMethod && methods.some((m) => m.key === chosenMethod && m.usable) ? chosenMethod : null;
 
   const [attempts] = useState(createAttemptTracker);
   const [placing, setPlacing] = useState(false);
@@ -834,6 +836,8 @@ function Checkout() {
             >
               {placing ? (
                 <ActivityIndicator color={Theme.colors.white} size="small" />
+              ) : !paymentMethod && canChooseMethod ? (
+                <Text style={styles.placeOrderText}>Select a payment method</Text>
               ) : (
                 <>
                   <Ionicons
