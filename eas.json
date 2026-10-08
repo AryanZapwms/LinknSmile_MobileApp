@@ -12,6 +12,10 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://linknsmile.com",
+        "EXPO_PUBLIC_RAZORPAY_KEY_ID": "rzp_live_TWfZDi2JZ430gP"
       }
     },
     "production": {
