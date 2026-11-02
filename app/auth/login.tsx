@@ -121,7 +121,7 @@ export default function LoginScreen() {
             <View style={styles.logoCircle}>
               <Ionicons name="storefront" size={36} color={Theme.colors.white} />
             </View>
-            <Text style={styles.brandName}>LinkAndSmile</Text>
+            <Text style={styles.brandName}>LNS</Text>
             <Text style={styles.brandTagline}>Your marketplace, simplified</Text>
           </View>
 
@@ -220,7 +220,7 @@ export default function LoginScreen() {
             {/* Divider */}
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>New to LinkAndSmile?</Text>
+              <Text style={styles.dividerText}>New to LNS?</Text>
               <View style={styles.dividerLine} />
             </View>
 

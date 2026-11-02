@@ -77,7 +77,7 @@ export async function openRazorpayCheckout(options: RazorpayCheckoutOptions): Pr
       order_id: options.orderId,
       amount: options.amount,
       currency: options.currency,
-      name: 'LinkAndSmile',
+      name: 'LNS',
       description: options.description ?? 'Order payment',
       prefill: options.prefill ?? {},
       theme: { color: options.themeColor ?? '#6C5CE7' },

@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { api } from '../../services/api';
+import { offerPushNotifications } from '../../services/notification.service';
 import { Theme } from '../../constants/theme';
 import { withSellingGate } from '../../components/vendor/SellingGate';
 
@@ -102,6 +103,18 @@ function VendorOrdersScreen() {
   }, []);
 
   useEffect(() => { fetchOrders(); }, []);
+
+  // Sellers rely on push to hear about new orders: ask here, where the reason
+  // is obvious. This screen is not mounted while selling is locked.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void offerPushNotifications({
+        title: 'Get new order alerts?',
+        message: "We'll notify you about new orders, product approvals and payouts.",
+      });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const doUpdateStatus = async (order: VendorOrder, newStatus: string, reason?: string) => {
     setUpdatingOrderId(order._id);

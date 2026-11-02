@@ -204,7 +204,7 @@ export default function RegisterScreen() {
               <Ionicons name="person-add-outline" size={28} color={Theme.colors.white} />
             </View>
             <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>Join LinkAndSmile today</Text>
+            <Text style={styles.subtitle}>Join LNS today</Text>
           </View>
 
           <Animated.View style={[styles.card, { transform: [{ translateX: shakeAnim }] }]}>

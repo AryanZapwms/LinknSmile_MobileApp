@@ -14,7 +14,7 @@ export default function TermsScreen() {
   const links = useAppLinks();
 
   const documents = [
-    { icon: 'document-text-outline', label: 'Terms of Service', sub: 'The rules for using LinkAndSmile', url: links.terms },
+    { icon: 'document-text-outline', label: 'Terms of Service', sub: 'The rules for using LNS', url: links.terms },
     { icon: 'shield-checkmark-outline', label: 'Privacy Policy', sub: 'What data we collect and how we use it', url: links.privacyPolicy },
     { icon: 'return-down-back-outline', label: 'Refund Policy', sub: 'Returns, cancellations and refunds', url: links.refundPolicy },
   ] as const;

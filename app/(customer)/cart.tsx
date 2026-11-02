@@ -109,7 +109,7 @@ export default function CartScreen() {
             <Image source={item.image ? { uri: item.image } : undefined} style={styles.itemImg} />
             <View style={styles.itemDetails}>
               <Text style={styles.itemName} numberOfLines={2}>{item.name}</Text>
-              <Text style={styles.itemShop}>by {item.shopName ?? 'LinkAndSmile'}</Text>
+              <Text style={styles.itemShop}>by {item.shopName ?? 'LNS'}</Text>
               {item.selectedSize && (
                 <Text style={styles.itemSize}>
                   {item.selectedSize.size} · {item.selectedSize.quantity}{item.selectedSize.unit ?? ''}
