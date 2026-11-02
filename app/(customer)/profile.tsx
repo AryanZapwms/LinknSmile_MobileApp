@@ -135,7 +135,7 @@ const menuSections = [
           <QuickAction icon="cart-outline" label="Cart" onPress={() => router.push('/(customer)/cart')} />
           <QuickAction icon="receipt-outline" label="Orders" onPress={() => router.push('/(customer)/orders')} />
           <QuickAction icon="headset-outline" label="Support" onPress={() => Linking.openURL(telUrl(support.phone))} />
-          <QuickAction icon="share-social-outline" label="Share App"  onPress={() => Share.share({ message: `Check out LinkAndSmile: ${links.website}` })} />
+          <QuickAction icon="share-social-outline" label="Share App"  onPress={() => Share.share({ message: `Check out LNS: ${links.website}` })} />
         </View>
 
         {/* Menu Sections */}
@@ -170,7 +170,7 @@ const menuSections = [
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
 
-        <Text style={styles.version}>LinkAndSmile v1.0.0</Text>
+        <Text style={styles.version}>LNS v1.0.0</Text>
         <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>

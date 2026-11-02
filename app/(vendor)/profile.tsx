@@ -267,7 +267,7 @@ const fetchStats = useCallback(async () => {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
 
-        <Text style={styles.version}>LinkAndSmile v1.0.0</Text>
+        <Text style={styles.version}>LNS v1.0.0</Text>
         <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "LNS-Mobile",
+    "name": "LNS",
     "slug": "LNS-Mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,6 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.linknsmile.app",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
           "tez",
@@ -21,13 +22,12 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#026BE7",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.aryangupta1520.LNSMobile"
+      "package": "com.linknsmile.app"
     },
     "web": {
       "output": "static",
@@ -48,7 +48,13 @@
         }
       ],
       "expo-secure-store",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#026BE7"
+        }
+      ],
       "expo-font",
       "expo-image",
       "expo-status-bar",

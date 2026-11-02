@@ -718,7 +718,7 @@ function Checkout() {
                         {item.selectedSize.size} · {item.selectedSize.quantity}{item.selectedSize.unit ?? ''}
                       </Text>
                     )}
-                    <Text style={styles.reviewItemVendor}>by {line?.shopName ?? item.shopName ?? 'LinkAndSmile'}</Text>
+                    <Text style={styles.reviewItemVendor}>by {line?.shopName ?? item.shopName ?? 'LNS'}</Text>
                   </View>
                   <View style={styles.reviewItemRight}>
                     <Text style={styles.reviewItemQty}>×{item.quantity}</Text>

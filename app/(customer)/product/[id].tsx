@@ -268,7 +268,7 @@ export default function ProductDetailScreen() {
       ? selectedSize.discountPrice || selectedSize.price
       : product.discountPrice || product.price;
     await Share.share({
-      message: `Check out ${product.name} on LinkAndSmile!\nPrice: ₹${price}\n${product.description?.slice(0, 100)}...`,
+      message: `Check out ${product.name} on LNS!\nPrice: ₹${price}\n${product.description?.slice(0, 100)}...`,
       url: `${links.website}/products/${product._id}`,
     });
   };
